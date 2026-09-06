@@ -65,6 +65,20 @@ make demo
 
 Levanta los brokers y la observabilidad en Docker. `make help` lista el resto.
 
+## Correrlo en Kubernetes
+
+```sh
+make k8s
+```
+
+Crea un cluster local con kind, construye las cuatro imágenes, las carga en el
+nodo y despliega los dos charts. Al terminar, el panel queda en
+http://job-forge.localtest.me.
+
+Necesita Docker, `kind` y `helm`. Pide bastante memoria: son dos brokers y cuatro
+servicios dentro de una sola máquina virtual, así que conviene cerrar lo que no
+estés usando. `make kind-down` lo borra todo y no deja rastro.
+
 ## Aviso
 
 Todos los datos son sintéticos. Los paneles son públicos y anónimos, sin

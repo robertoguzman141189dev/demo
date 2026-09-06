@@ -15,16 +15,49 @@ image:
 
 # En local el tag es fijo. En prod lo escribe el pipeline con el SHA del commit y
 # nunca se repite.
+# Los recursos de aquí abajo son MÁS PEQUEÑOS que los del chart a propósito.
+# Los valores por defecto describen lo que estos servicios necesitan de verdad;
+# estos describen lo que cabe en un portátil que además tiene abierto un IDE y un
+# navegador. Es exactamente para lo que existen los values por entorno.
+#
+# No se tocan los límites de CPU: lo que aprieta en local es la memoria.
+
 api:
   image:
     tag: dev
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 384Mi
+
 worker:
   image:
     tag: dev
+  # Dos réplicas y no una: con una sola no se ve competir a los consumidores por
+  # la misma cola, que es media tesis del demo.
   replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: "1"
+      memory: 384Mi
+
 audit:
   image:
     tag: dev
+  resources:
+    requests:
+      cpu: 100m
+      memory: 320Mi
+    limits:
+      cpu: 500m
+      memory: 320Mi
+
 ui:
   image:
     tag: dev

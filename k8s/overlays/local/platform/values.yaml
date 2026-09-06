@@ -1,0 +1,33 @@
+# Values de los brokers para el cluster local de kind.
+#
+# Mismo criterio que en job-forge: los valores por defecto del chart describen lo
+# que los brokers necesitan; estos describen lo que cabe en un portátil.
+#
+# Aquí NO se toca storage.size, y no es un olvido: volumeClaimTemplates es
+# inmutable en un StatefulSet. Cambiar el tamaño después de la primera instalación
+# hace que `helm upgrade` falle con un "updates to statefulset spec ... are
+# forbidden", y para aplicarlo hay que borrar el StatefulSet conservando los PVC.
+# El disco no es lo que aprieta en local; la memoria sí.
+
+kafka:
+  # El heap por debajo del límite del contenedor, y el límite por debajo del que
+  # trae el chart. Kafka se apoya en la caché de página del sistema operativo,
+  # que vive fuera del heap: darle todo el contenedor al heap lo hace más lento,
+  # no más rápido.
+  heapOpts: "-Xmx384m -Xms384m"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 640Mi
+    limits:
+      cpu: "1"
+      memory: 896Mi
+
+rabbitmq:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

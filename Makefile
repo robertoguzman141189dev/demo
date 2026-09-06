@@ -124,7 +124,8 @@ kind-load: ## Carga las imágenes dentro del nodo de kind
 	@for I in $(IMAGES); do kind load docker-image job-forge-$$I:dev --name $(KIND_CLUSTER); done
 
 deploy: ## Instala los brokers y job-forge con los values de local
-	$(HELM) upgrade --install platform k8s/charts/platform --namespace platform --wait --timeout 10m
+	$(HELM) upgrade --install platform k8s/charts/platform --namespace platform \
+		-f k8s/overlays/local/platform/values.yaml --wait --timeout 10m
 	$(HELM) upgrade --install job-forge k8s/charts/job-forge --namespace job-forge \
 		-f k8s/overlays/local/job-forge/values.yaml --wait --timeout 10m
 
