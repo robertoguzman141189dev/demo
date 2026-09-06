@@ -1,0 +1,13 @@
+# node_modules se reinstala dentro del build desde el lockfile: mandar el de tu
+# máquina al daemon son cientos de megas por build y, peor, arriesga meter
+# binarios compilados para macOS en una imagen Linux.
+node_modules/
+dist/
+.angular/
+
+.git/
+.DS_Store
+*.tsbuildinfo
+
+# El proxy es del servidor de desarrollo de Angular; en el cluster enruta el Ingress.
+proxy.conf.json

@@ -1,0 +1,15 @@
+# Contexto del build de los tres servicios Java.
+#
+# El panel vive dentro de apps/job-forge pero tiene su propio Dockerfile y su
+# propio contexto: si no se excluye aquí, cada build de Java empieza mandándole
+# al daemon los cientos de megas de node_modules.
+ui/
+
+# Artefactos de compilación de la máquina: la imagen compila desde cero.
+*/target/
+
+.git/
+.gitignore
+.DS_Store
+*.iml
+.idea/

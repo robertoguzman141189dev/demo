@@ -1,0 +1,188 @@
+{{/*
+RabbitMQ: un nodo, con su configuración calcada de la que ya se validó en local.
+
+StatefulSet y no Deployment, y el motivo no es el disco: es el nombre. El nodo
+de Erlang se llama rabbit@<hostname>, y ese nombre queda grabado en el directorio
+de datos. Un Deployment da hostnames aleatorios, así que al reiniciarse el broker
+buscaría los datos de un nodo que ya no existe y arrancaría vacío. El StatefulSet
+garantiza que siempre sea rabbitmq-0.
+*/}}
+# Headless: da a rabbitmq-0 un nombre DNS estable, que es de lo que depende el
+# nodo de Erlang.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-headless
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: platform
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+
+---
+# El que usan los clientes. job-forge apunta aquí.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+    - name: management
+      port: 15672
+      targetPort: management
+    - name: metrics
+      port: 15692
+      targetPort: metrics
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: platform
+spec:
+  serviceName: rabbitmq-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rabbitmq
+        app.kubernetes.io/part-of: platform
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "15692"
+        # Rehace los pods cuando cambia la configuración. Sin esto, editar el
+        # ConfigMap no reinicia nada y el broker sigue con la configuración vieja
+        # mientras el repositorio dice otra cosa.
+        checksum/config: {{ include (print $.Template.BasePath "/rabbitmq-config.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.rabbitmq.uid }}
+        runAsGroup: {{ .Values.rabbitmq.uid }}
+        # fsGroup es lo que hace que el volumen recién creado sea escribible por
+        # el broker. En el compose local esto lo resolvía un contenedor busybox
+        # que hacía chown; en Kubernetes lo hace el kubelet al montar.
+        fsGroup: {{ .Values.rabbitmq.uid }}
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: rabbitmq
+          image: "{{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}"
+          imagePullPolicy: {{ .Values.rabbitmq.image.pullPolicy }}
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: management
+              containerPort: 15672
+            - name: metrics
+              containerPort: 15692
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rabbitmq.credentialsSecret }}
+                  key: {{ .Values.rabbitmq.usernameKey }}
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rabbitmq.credentialsSecret }}
+                  key: {{ .Values.rabbitmq.passwordKey }}
+          # Arrancar un broker de Erlang no es instantáneo. El startupProbe le da
+          # margen y mantiene las otras dos sondas suspendidas mientras tanto.
+          startupProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            periodSeconds: 5
+            failureThreshold: 24
+          # check_running pregunta de verdad al broker si está sirviendo, no si
+          # el puerto acepta conexiones.
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "check_running"]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.rabbitmq.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            capabilities:
+              drop:
+                - ALL
+            # Aquí NO va readOnlyRootFilesystem, y conviene que se vea la
+            # excepción en vez de esconderla: el runtime de Erlang escribe fuera
+            # del directorio de datos —cookie, logs, ficheros del propio nodo— y
+            # mapear cada ruta a un emptyDir hace el manifiesto más frágil que
+            # seguro. Los cuatro servicios de la aplicación sí lo llevan.
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+            - name: config
+              mountPath: /etc/rabbitmq/rabbitmq.conf
+              subPath: rabbitmq.conf
+            - name: config
+              mountPath: /etc/rabbitmq/enabled_plugins
+              subPath: enabled_plugins
+      volumes:
+        - name: config
+          configMap:
+            name: rabbitmq-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.rabbitmq.storage.className }}
+        storageClassName: {{ .Values.rabbitmq.storage.className }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.rabbitmq.storage.size }}
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: rabbitmq
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: platform
+spec:
+  # maxUnavailable y no minAvailable: con una sola réplica, un minAvailable de 1
+  # dejaría `kubectl drain` colgado para siempre, porque no hay manera de
+  # cumplirlo y quitar el pod a la vez.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq

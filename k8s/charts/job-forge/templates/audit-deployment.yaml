@@ -1,0 +1,82 @@
+{{- $component := "audit" -}}
+{{- $svc := .Values.audit -}}
+{{- if gt (int $svc.replicas) 3 }}
+{{- fail (printf "job-forge: audit.replicas es %d, y trabajos.eventos tiene 3 particiones. La cuarta replica no recibiria ninguna, nunca se declararia lista y bloquearia el despliegue. En Kafka no se escala mas alla del numero de particiones." (int $svc.replicas)) }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "job-forge.fullname" . }}-{{ $component }}
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas }}
+  selector:
+    matchLabels:
+      {{- include "job-forge.selectorLabels" (dict "root" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "job-forge.selectorLabels" (dict "root" . "component" $component) | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: {{ include "job-forge.fullname" . }}-{{ $component }}
+      securityContext:
+        {{- include "job-forge.podSecurityContext" (dict "uid" 10001) | nindent 8 }}
+      {{- include "job-forge.topologySpread" (dict "root" . "component" $component) | nindent 6 }}
+      # Al parar, el contenedor de escucha de Spring Kafka comitea el offset y
+      # sale del grupo limpiamente. Salir del grupo importa tanto como comitear:
+      # un consumidor que desaparece sin avisar obliga al resto a esperar el
+      # session.timeout completo antes de repartirse sus particiones.
+      terminationGracePeriodSeconds: {{ $svc.terminationGracePeriodSeconds }}
+      containers:
+        - name: audit
+          image: {{ include "job-forge.image" (dict "root" . "svc" $svc "component" $component) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            {{- include "job-forge.brokerEnv" . | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 3
+            failureThreshold: 30
+          # El grupo readiness de audit incluye kafkaConsumerAssignment: este pod
+          # no se declara listo mientras no tenga particiones asignadas. Un
+          # consumidor puede estar arrancado y con cero particiones durante un
+          # rebalance, y en ese hueco no proyecta ni un evento.
+          #
+          # failureThreshold alto a propósito: un rebalance normal deja al pod sin
+          # asignación unos segundos, y eso no debe sacarlo del Service en cuanto
+          # parpadea.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          securityContext:
+            {{- include "job-forge.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi

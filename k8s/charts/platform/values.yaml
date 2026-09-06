@@ -1,0 +1,57 @@
+# Los brokers del cluster.
+#
+# Un nodo de cada uno. No es una configuración de producción y no finge serlo:
+# el objetivo del repositorio es enseñar cómo se opera la mensajería, no montar
+# un quórum de tres controllers que nadie va a leer. Cuando el número de réplicas
+# importe para lo que se está demostrando, se sube y se documenta por qué.
+
+rabbitmq:
+  image:
+    repository: rabbitmq
+    tag: 4.3.5-management-alpine
+    pullPolicy: IfNotPresent
+  # El usuario con el que corre el proceso en la imagen oficial.
+  uid: 999
+  # Credenciales por referencia. Este chart NO crea el Secret: en local lo genera
+  # `make kind-secret` con una contraseña aleatoria y en AWS lo materializa
+  # External Secrets. El repositorio no contiene secretos, ni siquiera cifrados.
+  credentialsSecret: job-forge-rabbitmq
+  usernameKey: username
+  passwordKey: password
+  storage:
+    size: 2Gi
+    # Vacío: usa la StorageClass por defecto del cluster. En kind es local-path.
+    className: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+kafka:
+  image:
+    repository: apache/kafka
+    tag: "4.3.1"
+    pullPolicy: IfNotPresent
+  uid: 1000
+  # Se estampa en el directorio de datos al formatearlo. Cambiarlo con datos ya
+  # escritos hace que el nodo se niegue a arrancar, porque ese directorio
+  # pertenece a otro cluster.
+  clusterId: 5L6g3nShT-eMCtK--X86sw
+  # El heap deliberadamente por debajo del límite de memoria: Kafka se apoya
+  # mucho en la caché de página del sistema operativo, que vive fuera del heap.
+  # Darle todo el contenedor al heap deja al broker sin caché y lo hace más
+  # lento, no más rápido.
+  heapOpts: "-Xmx512m -Xms512m"
+  storage:
+    size: 4Gi
+    className: ""
+  resources:
+    requests:
+      cpu: 300m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 1536Mi

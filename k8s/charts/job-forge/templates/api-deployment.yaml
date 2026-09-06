@@ -1,0 +1,95 @@
+{{- $component := "api" -}}
+{{- $svc := .Values.api -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "job-forge.fullname" . }}-{{ $component }}
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas }}
+  selector:
+    matchLabels:
+      {{- include "job-forge.selectorLabels" (dict "root" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "job-forge.selectorLabels" (dict "root" . "component" $component) | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: {{ include "job-forge.fullname" . }}-{{ $component }}
+      securityContext:
+        {{- include "job-forge.podSecurityContext" (dict "uid" 10001) | nindent 8 }}
+      {{- include "job-forge.topologySpread" (dict "root" . "component" $component) | nindent 6 }}
+      # Cubre el preStop más el apagado ordenado de Spring con holgura. Si este
+      # número quedara por debajo, el SIGKILL llegaría a media parada y sobraría
+      # todo lo demás.
+      terminationGracePeriodSeconds: {{ $svc.terminationGracePeriodSeconds }}
+      containers:
+        - name: api
+          image: {{ include "job-forge.image" (dict "root" . "svc" $svc "component" $component) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            {{- include "job-forge.brokerEnv" . | nindent 12 }}
+          {{- if gt (int $svc.preStopSeconds) 0 }}
+          lifecycle:
+            preStop:
+              # La salida del pod de los endpoints del Service es asíncrona
+              # respecto al SIGTERM: durante un instante el Ingress sigue
+              # mandando peticiones a un pod que ya está cerrando, y eso corta
+              # los WebSocket del panel a media sesión. Esta espera cubre esa
+              # ventana; el apagado ordenado empieza después.
+              sleep:
+                seconds: {{ $svc.preStopSeconds }}
+          {{- end }}
+          # Tres sondas con tres preguntas distintas.
+          #
+          # startup: "¿ya arrancó?" Mientras falla, las otras dos están
+          # suspendidas. Es lo que permite ser paciente al arrancar una JVM y
+          # agresivo el resto del tiempo.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 2
+            failureThreshold: 45
+          # readiness: "¿te mando tráfico?" Si falla, sale del Service pero NO se
+          # reinicia.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # liveness: "¿hay que matarte?" Mira solo el estado interno del
+          # proceso, nunca los brokers. Si RabbitMQ se cae dos minutos y esto lo
+          # notara, Kubernetes reiniciaría todas las réplicas a la vez y
+          # convertiría una caída pasajera en un CrashLoopBackOff en cascada.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          securityContext:
+            {{- include "job-forge.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            # readOnlyRootFilesystem deja a la JVM sin sitio donde escribir
+            # hsperfdata ni sus temporales, y no arranca. Este montaje es lo que
+            # hace compatible el endurecimiento con Java.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi

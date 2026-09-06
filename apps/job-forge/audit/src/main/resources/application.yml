@@ -32,6 +32,12 @@ management:
       probes:
         enabled: true
       show-details: always
+      group:
+        # La readiness del proyector no es "el puerto responde" ni "el contexto
+        # levantó": es "tengo particiones asignadas". Ver
+        # KafkaConsumerAssignmentHealthIndicator.
+        readiness:
+          include: readinessState,kafkaConsumerAssignment
   metrics:
     tags:
       application: job-forge-audit

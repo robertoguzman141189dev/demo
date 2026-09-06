@@ -1,0 +1,11 @@
+apiVersion: v2
+name: platform
+description: Los brokers que comparten los dos demos, en el namespace platform
+type: application
+version: 0.1.0
+
+# Escrito a mano y no traído de un chart de terceros, a sabiendas de lo que eso
+# cuesta. El motivo está en el ADR 007: un chart de RabbitMQ o de Kafka de
+# terceros trae cientos de valores para escenarios que este repositorio no tiene,
+# y esconde justo lo que el repositorio quiere enseñar. Lo de aquí es un nodo de
+# cada broker, sin alta disponibilidad y sin pretenderla.

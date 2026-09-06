@@ -1,0 +1,140 @@
+# Valores por defecto de job-forge.
+#
+# Este archivo describe la forma del despliegue, no un entorno concreto. Lo que
+# cambia por entorno vive en k8s/overlays/<entorno>/job-forge/values.yaml, que es
+# el único punto que el pipeline escribe (ADR 002).
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # Vacío en local: kind carga las imágenes directamente en el nodo. En F6 pasa
+  # a ser el registro de ECR, con el sufijo "/" incluido.
+  registry: ""
+  pullPolicy: IfNotPresent
+
+# Dónde están los brokers. El namespace platform es el único con el que los
+# namespaces de aplicación pueden hablar: lo impone templates/networkpolicy.yaml.
+platform:
+  namespace: platform
+  rabbitmq:
+    host: rabbitmq.platform.svc.cluster.local
+    port: 5672
+    # Credenciales por referencia, nunca por valor. El repositorio no contiene
+    # secretos ni cifrados: en local este Secret lo crea `make kind-secret` con
+    # una contraseña aleatoria, y en AWS lo materializa External Secrets desde
+    # Secrets Manager (F6).
+    credentialsSecret: job-forge-rabbitmq
+    usernameKey: username
+    passwordKey: password
+  kafka:
+    bootstrap: kafka.platform.svc.cluster.local:9092
+
+# Prometheus vive en su propio namespace y necesita alcanzar /actuator/prometheus.
+# Se declara aquí para que la NetworkPolicy pueda abrirle el paso sin que haya que
+# tocar plantillas.
+observability:
+  namespace: observability
+
+# El controlador de Ingress también es ajeno al namespace y también tiene que
+# poder entrar, pero solo hacia el panel y el API.
+ingress:
+  enabled: true
+  className: nginx
+  namespace: ingress-nginx
+  host: job-forge.localtest.me
+  annotations: {}
+
+# Reparto entre nodos. Se queda apagado en kind, que tiene un nodo solo: con un
+# único nodo la restricción no se puede satisfacer y los pods se quedarían en
+# Pending. Se enciende en el módulo de EKS.
+topologySpread:
+  enabled: false
+
+serviceAccount:
+  # Un ServiceAccount por servicio, nunca el default. Ninguno de los cuatro habla
+  # con la API de Kubernetes, así que tampoco se les monta el token: si no se
+  # necesita, no se entrega.
+  automountServiceAccountToken: false
+  annotations: {}
+
+# --------------------------------------------------------------------- api ---
+api:
+  replicas: 1
+  image:
+    repository: job-forge-api
+    # Vacío a propósito. Un despliegue sin tag debe fallar al renderizar, no
+    # desplegar algo arbitrario (ADR 002).
+    tag: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # Sirve HTTP y WebSocket, así que sí está detrás de un Service: necesita el
+  # preStop que cubre la ventana entre el SIGTERM y su salida de los endpoints.
+  preStopSeconds: 5
+  # timeout-per-shutdown-phase del api son 20s; esto tiene que cubrir eso más el
+  # preStop y sobrar.
+  terminationGracePeriodSeconds: 40
+
+# ------------------------------------------------------------------ worker ---
+worker:
+  replicas: 2
+  image:
+    repository: job-forge-worker
+    tag: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # Sin preStop: nadie le manda tráfico, va él a buscarlo a la cola. La ventana
+  # de endpoints que el api sí sufre aquí no existe.
+  preStopSeconds: 0
+  # La cadena de plazos, de dentro afuera: shutdown-timeout del contenedor de
+  # Rabbit (30s) < timeout-per-shutdown-phase (45s) < esto. Si se invierte, gana
+  # el plazo más corto y el resto de la configuración es decorativa.
+  terminationGracePeriodSeconds: 60
+  # El worker reconstruye su estado desde el topic compactado antes de consumir
+  # (ADR 005) y no se declara listo hasta terminar. Su state-rebuild-timeout son
+  # 60s: la readiness tiene que tolerar esa espera sin que nadie lo mate.
+  stateRebuildSeconds: 60
+
+# ------------------------------------------------------------------- audit ---
+audit:
+  # Tope duro: trabajos.eventos tiene 3 particiones. Una cuarta réplica no
+  # recibiría ninguna, nunca se declararía lista y bloquearía el despliegue.
+  replicas: 1
+  image:
+    repository: job-forge-audit
+    tag: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
+  preStopSeconds: 0
+  terminationGracePeriodSeconds: 40
+
+# ---------------------------------------------------------------------- ui ---
+ui:
+  replicas: 1
+  image:
+    repository: job-forge-ui
+    tag: ""
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
+  preStopSeconds: 5
+  terminationGracePeriodSeconds: 30

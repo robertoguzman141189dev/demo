@@ -1,0 +1,56 @@
+{{- if .Values.ingress.enabled }}
+{{/*
+El Ingress es el único punto de entrada, y también el sitio donde F7 pondrá el
+rate limiting: el panel es público y anónimo, y el endpoint no puede ser un
+vector de gasto.
+
+El reparto de rutas se hace aquí y no dentro de nginx del panel. Así hay un solo
+lugar donde se decide quién atiende qué, y ese lugar es el mismo donde se
+aplicarán los topes.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "job-forge.fullname" . }}
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" "ingress") | nindent 4 }}
+  annotations:
+    # El panel mantiene un WebSocket abierto para el tiempo real (ADR 006). Con
+    # el timeout de lectura por defecto, el socket se cae cada minuto y el panel
+    # parece parpadear sin motivo.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          # Las rutas más específicas primero. El controlador de nginx ordena por
+          # longitud, así que /api gana sobre / aunque el orden del YAML fuera
+          # otro; se escriben así de todas formas para que se lea la intención.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "job-forge.fullname" . }}-api
+                port:
+                  name: http
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "job-forge.fullname" . }}-api
+                port:
+                  name: http
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "job-forge.fullname" . }}-ui
+                port:
+                  name: http
+{{- end }}

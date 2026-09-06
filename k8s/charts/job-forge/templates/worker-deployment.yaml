@@ -1,0 +1,99 @@
+{{- $component := "worker" -}}
+{{- $svc := .Values.worker -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "job-forge.fullname" . }}-{{ $component }}
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas }}
+  selector:
+    matchLabels:
+      {{- include "job-forge.selectorLabels" (dict "root" . "component" $component) | nindent 6 }}
+  strategy:
+    rollingUpdate:
+      # Un worker de más durante el despliegue no molesta: los consumidores de
+      # una cola compiten por los mensajes y sobran manos. Lo que no puede pasar
+      # es quedarse sin ninguno, que es lo que evita maxUnavailable 0.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "job-forge.selectorLabels" (dict "root" . "component" $component) | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: {{ include "job-forge.fullname" . }}-{{ $component }}
+      securityContext:
+        {{- include "job-forge.podSecurityContext" (dict "uid" 10001) | nindent 8 }}
+      {{- include "job-forge.topologySpread" (dict "root" . "component" $component) | nindent 6 }}
+      # La cadena completa, de dentro afuera:
+      #
+      #   shutdown-timeout del contenedor de Rabbit .. 30s
+      #   timeout-per-shutdown-phase de Spring ....... 45s
+      #   terminationGracePeriodSeconds .............. este valor
+      #
+      # Estrictamente creciente. Al recibir SIGTERM el worker deja de sacar
+      # mensajes, termina la tarea en curso, publica al tramo de reintento que
+      # toque, espera el confirm y solo entonces acusa el original (ADR 004).
+      # Ese "solo entonces" es lo que este plazo tiene que dejar terminar.
+      terminationGracePeriodSeconds: {{ $svc.terminationGracePeriodSeconds }}
+      containers:
+        - name: worker
+          image: {{ include "job-forge.image" (dict "root" . "svc" $svc "component" $component) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            {{- include "job-forge.brokerEnv" . | nindent 12 }}
+          # Sin preStop, y no por olvido: el worker no está detrás de ningún
+          # Service que le mande trabajo. Va él a buscarlo a jobs.work. La
+          # ventana entre el SIGTERM y la salida de los endpoints, que al api sí
+          # le duele, aquí sencillamente no existe.
+          #
+          # El startupProbe es generoso porque este pod hace algo antes de poder
+          # trabajar: reconstruir su estado desde el topic compactado (ADR 005).
+          # Además, si Kafka no está disponible el proceso muere al arrancar a
+          # propósito, así que el pod reintenta por CrashLoopBackOff hasta que el
+          # broker aparece. Es correcto, pero conviene saberlo antes de asustarse
+          # viendo reinicios en un cluster recién levantado.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 3
+            failureThreshold: {{ div (add $svc.stateRebuildSeconds 60) 3 }}
+          # "Estoy asignado y consumiendo", no "el puerto responde": el grupo
+          # readiness del worker incluye stateRebuildRunner, que está abajo hasta
+          # que la reconstrucción termina. Sin esto, un despliegue progresivo
+          # mataría al worker viejo mientras el nuevo todavía no consume.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          securityContext:
+            {{- include "job-forge.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi

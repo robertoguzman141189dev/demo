@@ -2,6 +2,7 @@ package com.eventlab.jobforge.worker;
 
 import com.eventlab.jobforge.contracts.message.JobTask;
 import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.random.RandomGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,9 +26,12 @@ public class TaskProcessor {
     private final WorkerProperties properties;
     private final RandomGenerator random;
 
+    // ThreadLocalRandom por el mismo motivo que en FailureInjector: el algoritmo
+    // que devuelve RandomGenerator.getDefault() vive en el módulo jdk.random, que
+    // el JRE de la imagen no trae, y además no es seguro entre hilos.
     @Autowired
     public TaskProcessor(WorkerProperties properties) {
-        this(properties, RandomGenerator.getDefault());
+        this(properties, ThreadLocalRandom.current());
     }
 
     TaskProcessor(WorkerProperties properties, RandomGenerator random) {

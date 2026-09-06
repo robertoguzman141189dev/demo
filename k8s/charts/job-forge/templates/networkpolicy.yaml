@@ -1,0 +1,137 @@
+{{/*
+"Los namespaces de aplicación solo hablan con platform."
+
+Una NetworkPolicy no es una regla de firewall suelta: es una lista blanca que se
+activa por selección. En cuanto UNA política selecciona un pod, ese pod pasa a
+denegar por defecto todo lo que ninguna política le permita. Por eso la primera
+de aquí abajo selecciona a todos y no permite nada: convierte el namespace en
+denegar-por-defecto, y las siguientes van abriendo agujeros concretos.
+
+AVISO IMPORTANTE: estas políticas solo se aplican si el CNI las implementa. El
+CNI por defecto de kind no lo hace, así que en local se crean y no filtran nada.
+Se comprueban de verdad en EKS (F6). No confundir "el manifiesto está aplicado"
+con "la regla está en vigor".
+*/}}
+---
+# Denegar por defecto, en las dos direcciones. Sin esta política, todo lo demás
+# es decorativo: en Kubernetes la ausencia de políticas significa "todo permitido".
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "job-forge.fullname" . }}-default-deny
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# DNS. Este es el agujero que todo el mundo olvida y que convierte un
+# denegar-por-defecto en una caída total: sin resolver nombres, los servicios ni
+# siquiera llegan a intentar conectarse a los brokers. El síntoma es un
+# UnknownHostException que no menciona la palabra "red" por ninguna parte.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "job-forge.fullname" . }}-allow-dns
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+---
+# Salida hacia los brokers, y solo hacia los brokers. Es la regla que da sentido
+# a la frase "solo hablan con platform".
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "job-forge.fullname" . }}-allow-platform
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.platform.namespace }}
+      ports:
+        - port: {{ .Values.platform.rabbitmq.port }}
+          protocol: TCP
+        - port: 9092
+          protocol: TCP
+
+{{- if .Values.ingress.enabled }}
+---
+# Entrada desde el controlador de Ingress, y solo hacia lo que sirve tráfico. El
+# worker y el proyector quedan fuera a propósito: nadie de fuera tiene por qué
+# alcanzarlos, y el panel es público y anónimo.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "job-forge.fullname" . }}-allow-ingress-controller
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" "network") | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [api, ui]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.ingress.namespace }}
+      ports:
+        - port: 8080
+          protocol: TCP
+{{- end }}
+
+---
+# Entrada desde Prometheus hacia /actuator/prometheus. Sin esto, el
+# denegar-por-defecto deja los cuatro servicios sin métricas y los dashboards de
+# F7 nacen vacíos.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "job-forge.fullname" . }}-allow-metrics-scrape
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" "network") | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.observability.namespace }}
+      ports:
+        - port: 8080
+          protocol: TCP
+
+{{/*
+Una duda que aparece siempre al leer un denegar-por-defecto y que no está
+documentada en ningún sitio obvio: las sondas del kubelet NO se ven afectadas por
+estas políticas. Nacen en el nodo, no en un pod, y ninguna NetworkPolicy las
+alcanza. No hace falta abrirles paso.
+*/}}

@@ -1,0 +1,34 @@
+{{/*
+Dos clases de Service, y la diferencia no es cosmética.
+
+api y ui reciben tráfico de verdad desde el Ingress: son ClusterIP normales, con
+su IP virtual y su balanceo.
+
+worker y audit no reciben nada. Son consumidores: van ellos a buscar el trabajo a
+la cola y al topic. Su Service existe solo para que Prometheus tenga un objetivo
+estable, así que se declaran headless: sin IP virtual, resolviendo directamente a
+las IP de los pods. Darles un ClusterIP normal sugeriría que alguien les manda
+peticiones, y en este diseño nadie lo hace.
+*/}}
+{{- range $component := list "api" "ui" "worker" "audit" }}
+{{- $headless := has $component (list "worker" "audit") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "job-forge.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "job-forge.labels" (dict "root" $ "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  {{- if $headless }}
+  clusterIP: None
+  {{- end }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "job-forge.selectorLabels" (dict "root" $ "component" $component) | nindent 4 }}
+{{- end }}

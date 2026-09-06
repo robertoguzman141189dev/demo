@@ -1,0 +1,41 @@
+# Values de job-forge para el cluster local de kind.
+#
+# Lo único que distingue un entorno de otro vive en archivos como este (ADR 002).
+# El de prod nace en F6, cuando exista un registro al que apuntar y un pipeline
+# que escriba el tag.
+
+image:
+  # Sin registro: las imágenes se construyen en tu máquina y se cargan en el nodo
+  # de kind con `kind load docker-image`. No hay nada que descargar.
+  registry: ""
+  # Never y no IfNotPresent: si el tag no estuviera en el nodo, IfNotPresent
+  # intentaría bajarlo de Docker Hub y fallaría con un ImagePullBackOff confuso.
+  # Con Never el error dice exactamente lo que pasa: la imagen no está cargada.
+  pullPolicy: Never
+
+# En local el tag es fijo. En prod lo escribe el pipeline con el SHA del commit y
+# nunca se repite.
+api:
+  image:
+    tag: dev
+worker:
+  image:
+    tag: dev
+  replicas: 2
+audit:
+  image:
+    tag: dev
+ui:
+  image:
+    tag: dev
+
+# Un solo nodo: repartir entre nodos no significa nada aquí.
+topologySpread:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: nginx
+  namespace: ingress-nginx
+  # localtest.me resuelve a 127.0.0.1 sin tocar /etc/hosts.
+  host: job-forge.localtest.me

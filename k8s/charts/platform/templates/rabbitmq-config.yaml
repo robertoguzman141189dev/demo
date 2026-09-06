@@ -1,0 +1,35 @@
+{{/*
+En su propio archivo para que el StatefulSet pueda calcular el hash de este
+contenido con include, y así rehacer los pods cuando la configuración cambie.
+Dentro del mismo archivo, ese include se llamaría a sí mismo.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-config
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: platform
+data:
+  enabled_plugins: |
+    [rabbitmq_management,rabbitmq_prometheus].
+  rabbitmq.conf: |
+    # Aquí no se declara topología. Exchanges, colas quorum, TTL y DLX nacen en
+    # código con Spring AMQP (F1): un broker que arranca con la topología ya
+    # puesta esconde justo lo que este repositorio quiere enseñar.
+
+    # rabbitmq_prometheus expone /metrics en el 15692, sin sidecar.
+    prometheus.tcp.port = 15692
+    prometheus.return_per_object_metrics = false
+
+    # Al superar este porcentaje de la memoria disponible el broker aplica
+    # contrapresión y deja de aceptar publicaciones hasta que los consumidores se
+    # pongan al día. Es una defensa, no un error: si el productor se bloquea,
+    # mírese esto antes de culpar al código.
+    vm_memory_high_watermark.relative = 0.6
+
+    # Las colas quorum persisten siempre a disco, así que este umbral pesa más
+    # aquí que con colas clásicas.
+    disk_free_limit.absolute = 1GB
+
+    log.console.level = info

@@ -1,5 +1,6 @@
 package com.eventlab.jobforge.worker;
 
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.random.RandomGenerator;
 import org.springframework.stereotype.Component;
 
@@ -16,8 +17,20 @@ public class FailureInjector {
 
     private final RandomGenerator random;
 
+    /**
+     * ThreadLocalRandom y no {@code RandomGenerator.getDefault()} por dos motivos,
+     * los dos descubiertos empaquetando en F5:
+     *
+     * <p>El algoritmo por defecto vive en el módulo {@code jdk.random}, que el JRE
+     * de Temurin no incluye. La aplicación arrancaba en tu máquina, donde hay un
+     * JDK completo, y moría en la imagen con un error que no menciona ni módulos
+     * ni empaquetado.
+     *
+     * <p>Y ese generador por defecto no es seguro entre hilos. Hoy da igual porque
+     * la concurrencia del worker es 1, pero es una mina para el día que se suba.
+     */
     public FailureInjector() {
-        this(RandomGenerator.getDefault());
+        this(ThreadLocalRandom.current());
     }
 
     FailureInjector(RandomGenerator random) {

@@ -9,8 +9,18 @@ COMPOSE := docker compose -f local/docker-compose.yml
 JAVA_HOME ?= $(shell /usr/libexec/java_home -v 21 2>/dev/null)
 MVN := JAVA_HOME=$(JAVA_HOME) mvn -B
 
+# ---------------------------------------------------------------- F5: kind ---
+KIND_CLUSTER := event-lab
+KUBECTL := kubectl --context kind-$(KIND_CLUSTER)
+HELM := helm --kube-context kind-$(KIND_CLUSTER)
+# Se fija la versión del controlador de Ingress: "main" cambia bajo los pies y
+# convierte un despliegue reproducible en una ruleta.
+INGRESS_NGINX_VERSION := controller-v1.15.1
+IMAGES := api worker audit ui
+
 .DEFAULT_GOAL := help
-.PHONY: help demo up down restart ps logs topics urls clean nuke build test verify run-api run-worker run-audit run-ui estado
+.PHONY: help demo up down restart ps logs topics urls clean nuke build test verify run-api run-worker run-audit run-ui estado \
+        kind-up kind-down kind-ingress kind-secret images kind-load deploy k8s k8s-status k8s-urls
 
 help: ## Lista los objetivos disponibles
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -73,6 +83,67 @@ estado: ## Vuelca el topic compactado: el estado actual de cada tarea
 	$(COMPOSE) exec -e KAFKA_OPTS= kafka /opt/kafka/bin/kafka-console-consumer.sh \
 		--bootstrap-server localhost:9092 --topic trabajos.estado \
 		--from-beginning --property print.key=true --timeout-ms 5000
+
+# ------------------------------------------------------------ F5: en kind ----
+# Todo lo de abajo despliega job-forge en un cluster de verdad. `make k8s` hace
+# el recorrido completo desde cero; el resto son los pasos sueltos.
+
+k8s: kind-up kind-ingress kind-secret images kind-load deploy k8s-urls ## Despliegue completo en kind, desde cero
+
+kind-up: ## Crea el cluster local de kind
+	kind create cluster --config local/kind/cluster.yaml
+	$(KUBECTL) wait --for=condition=Ready node --all --timeout=180s
+
+kind-ingress: ## Instala el controlador de Ingress y espera a que esté listo
+	$(KUBECTL) apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/$(INGRESS_NGINX_VERSION)/deploy/static/provider/kind/deploy.yaml
+	$(KUBECTL) -n ingress-nginx wait --for=condition=Available deployment/ingress-nginx-controller --timeout=300s
+
+# La contraseña se genera aquí y no se escribe en ningún archivo del repositorio.
+# En AWS este Secret lo materializa External Secrets desde Secrets Manager; el
+# mecanismo cambia, el contrato —un Secret con username y password— no.
+kind-secret: ## Crea el Secret de RabbitMQ con una contraseña aleatoria
+	@$(KUBECTL) create namespace platform --dry-run=client -o yaml | $(KUBECTL) apply -f -
+	@$(KUBECTL) create namespace job-forge --dry-run=client -o yaml | $(KUBECTL) apply -f -
+	@PASS=$$(openssl rand -hex 16); \
+	for NS in platform job-forge; do \
+	  $(KUBECTL) -n $$NS create secret generic job-forge-rabbitmq \
+	    --from-literal=username=job-forge --from-literal=password=$$PASS \
+	    --dry-run=client -o yaml | $(KUBECTL) apply -f -; \
+	done
+
+images: ## Construye las cuatro imágenes con el tag dev
+	docker build --build-arg MODULE=api   -t job-forge-api:dev   apps/job-forge
+	docker build --build-arg MODULE=worker -t job-forge-worker:dev apps/job-forge
+	docker build --build-arg MODULE=audit -t job-forge-audit:dev apps/job-forge
+	docker build -t job-forge-ui:dev apps/job-forge/ui
+
+# kind no ve el registro local de Docker: las imágenes hay que meterlas dentro
+# del nodo. Sin esto, los pods se quedan en ImagePullBackOff intentando bajar de
+# Docker Hub una imagen que solo existe en tu máquina.
+kind-load: ## Carga las imágenes dentro del nodo de kind
+	@for I in $(IMAGES); do kind load docker-image job-forge-$$I:dev --name $(KIND_CLUSTER); done
+
+deploy: ## Instala los brokers y job-forge con los values de local
+	$(HELM) upgrade --install platform k8s/charts/platform --namespace platform --wait --timeout 10m
+	$(HELM) upgrade --install job-forge k8s/charts/job-forge --namespace job-forge \
+		-f k8s/overlays/local/job-forge/values.yaml --wait --timeout 10m
+
+k8s-status: ## Estado de los pods de los dos namespaces
+	@$(KUBECTL) -n platform get pods -o wide
+	@echo ""
+	@$(KUBECTL) -n job-forge get pods -o wide
+
+k8s-urls: ## Dónde entrar una vez desplegado
+	@echo ""
+	@echo "  Panel   http://job-forge.localtest.me    (localtest.me resuelve a 127.0.0.1)"
+	@echo ""
+	@echo "  Consola de RabbitMQ, si hace falta mirar dentro:"
+	@echo "    kubectl -n platform port-forward svc/rabbitmq 15672:15672"
+	@echo "    usuario job-forge; la contraseña está en el Secret job-forge-rabbitmq"
+	@echo ""
+
+kind-down: ## Borra el cluster de kind entero
+	kind delete cluster --name $(KIND_CLUSTER)
 
 clean: ## Apaga y borra los volúmenes: brokers vacíos, estado perdido
 	$(COMPOSE) down -v

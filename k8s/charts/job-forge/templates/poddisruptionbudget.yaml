@@ -1,0 +1,29 @@
+{{/*
+PodDisruptionBudget: cuántos pods pueden estar caídos A LA VEZ durante una
+operación planificada — un drenaje de nodo, una actualización del cluster.
+
+Lo que NO hace, y que casi todo el mundo asume que sí: no protege de nada
+involuntario. Si el nodo se muere o el OOM killer se lleva un pod por delante, el
+PDB no interviene. No es una garantía de disponibilidad; es un freno para quien
+drena.
+
+maxUnavailable y no minAvailable, y esto es lo importante: un minAvailable de 1
+sobre un Deployment de UNA réplica bloquea el drenaje del nodo para siempre. No
+hay forma de cumplir el presupuesto y quitar el pod a la vez, y `kubectl drain`
+se queda colgado sin decir por qué. Expresado como maxUnavailable, el mismo
+despliegue de una réplica se drena sin pelea.
+*/}}
+{{- range $component := list "api" "ui" "worker" "audit" }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "job-forge.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "job-forge.labels" (dict "root" $ "component" $component) | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "job-forge.selectorLabels" (dict "root" $ "component" $component) | nindent 6 }}
+{{- end }}

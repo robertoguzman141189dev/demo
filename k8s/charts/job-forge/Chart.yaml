@@ -1,0 +1,16 @@
+apiVersion: v2
+name: job-forge
+description: Orquestador de trabajos sobre RabbitMQ; la entrega resiliente como producto
+type: application
+
+# La versión del chart se sube cuando cambia el chart. appVersion no se fija
+# aquí: la versión desplegada es el tag de imagen, y ese lo escribe el pipeline
+# en el values del entorno (ADR 002). Poner un appVersion mentiría en cuanto se
+# despliegue el primer commit.
+version: 0.1.0
+
+keywords:
+  - rabbitmq
+  - kafka
+  - mensajeria
+home: https://github.com/robertoguzman/event-lab

@@ -1,0 +1,31 @@
+# Cluster local de kind para probar el empaquetado de F5.
+#
+# Un nodo. No intenta parecerse a EKS: sirve para comprobar que los manifiestos
+# son correctos, que las sondas dicen la verdad y que el apagado ordenado
+# funciona cuando se mata un pod de verdad. Lo que necesita más de un nodo
+# —topologySpreadConstraints, reparto entre zonas— se prueba en F6.
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: event-lab
+
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      # La etiqueta que el manifiesto de ingress-nginx para kind usa como
+      # nodeSelector. Sin ella el controlador se queda en Pending para siempre.
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # Saca el Ingress a los puertos de tu máquina. Es lo que permite abrir
+      # http://job-forge.localtest.me sin port-forward ni /etc/hosts:
+      # localtest.me resuelve a 127.0.0.1 por diseño.
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
