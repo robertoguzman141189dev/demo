@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Agregador de job-forge. No hay POM padre común con stream-guard: los dos demos
+  comparten infraestructura y convenciones, no dependencias (ver ADR 001).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.16</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.eventlab.jobforge</groupId>
+  <artifactId>job-forge</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>job-forge</name>
+  <description>Orquestador de trabajos sobre RabbitMQ: entrega resiliente como producto</description>
+
+  <modules>
+    <module>contracts</module>
+    <module>worker</module>
+    <module>api</module>
+    <module>audit</module>
+  </modules>
+
+  <properties>
+    <java.version>21</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <!--
+          Las pruebas que tocan un broker se ejecutan con failsafe (fase verify),
+          no con surefire (fase test). Así `mvn test` sigue siendo rápido y
+          `mvn verify` es el que levanta contenedores. Convención: *IT.java.
+        -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <executions>
+            <execution>
+              <goals>
+                <goal>integration-test</goal>
+                <goal>verify</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>

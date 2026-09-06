@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: job-forge-worker
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    # Sin esto, el código que "espera confirmación" devolvería verdadero al
+    # instante sin haber esperado nada y la protección sería puro teatro.
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      # Convierte el descarte silencioso de un mensaje no ruteable en un error
+      # visible. Es la defensa contra una routing key mal escrita.
+      mandatory: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+
+  # Margen total del apagado ordenado. Debe cubrir el shutdown-timeout del
+  # consumidor con holgura.
+  lifecycle:
+    timeout-per-shutdown-phase: 45s
+
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+      group:
+        # La readiness de un consumidor no es "el puerto responde": es "ya sé qué
+        # tareas están hechas y estoy consumiendo". Hasta que la reconstrucción
+        # termina, este pod no debe recibir nada.
+        readiness:
+          include: readinessState,stateRebuildRunner
+  metrics:
+    tags:
+      application: job-forge-worker
+
+job-forge:
+  worker:
+    prefetch: 1
+    concurrency: 1
+    task-duration: 2s
+    task-jitter: 3s
+    deduplication-window: 30m
+    shutdown-timeout: 30s
+    state-rebuild-timeout: 60s
+
+logging:
+  level:
+    com.eventlab.jobforge: INFO

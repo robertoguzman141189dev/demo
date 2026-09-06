@@ -1,0 +1,93 @@
+# Reglas de traducción de MBeans de Kafka a series de Prometheus.
+#
+# Deliberadamente NO se usa una regla comodín `- pattern: ".*"`. Kafka publica
+# miles de MBeans, y varios llevan atributos con valores ilimitados (id de
+# petición, id de cliente) o desglosan por percentil. Cada combinación de
+# etiquetas distinta es una serie temporal nueva en Prometheus, y ahí es donde se
+# le acaba la memoria. Lo que no aparezca en esta lista, no se exporta.
+#
+# El patrón se compara contra la cadena `dominio<claves><>atributo`, y el orden
+# de las claves es el que trae el MBean, no uno canónico: los beans de Kafka
+# empiezan por `type=`, los de la JVM por `name=`. Un patrón con el orden
+# equivocado no falla ni avisa: simplemente no produce ninguna serie. Para
+# descubrir la forma real de un bean, añade temporalmente una regla de sondeo:
+#
+#   - pattern: 'java.lang<(.*)><>(.*)'
+#     name: debug
+#     labels: {bean: "$1", attr: "$2"}
+
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+rules:
+
+  # Tráfico por topic: mensajes y bytes de entrada y salida.
+  # El topic sí es una etiqueta legítima: son unos pocos y los definimos nosotros.
+  - pattern: 'kafka.server<type=BrokerTopicMetrics, name=(.+)PerSec, topic=(.+)><>Count'
+    name: kafka_server_brokertopicmetrics_$1_total
+    labels:
+      topic: "$2"
+    type: COUNTER
+
+  # El mismo agregado, sin desglose por topic.
+  - pattern: 'kafka.server<type=BrokerTopicMetrics, name=(.+)PerSec><>Count'
+    name: kafka_server_brokertopicmetrics_$1_total
+    type: COUNTER
+
+  # Estado de la replicación: particiones sin réplicas sincronizadas, particiones
+  # sin líder. En un cluster real, lo primero que se mira cuando algo va mal.
+  - pattern: 'kafka.server<type=ReplicaManager, name=(.+)><>Value'
+    name: kafka_server_replicamanager_$1
+    type: GAUGE
+
+  # El controller: quién lidera el log de metadatos y cuántas particiones
+  # quedaron sin líder tras una caída.
+  - pattern: 'kafka.controller<type=(KafkaController|ControllerStats), name=(.+)><>(Value|Count)'
+    name: kafka_controller_$1_$2
+    type: GAUGE
+
+  # Peticiones por tipo (Produce, Fetch, …). Se descarta a propósito la etiqueta
+  # `version`, que multiplica series sin aportar nada a un dashboard.
+  - pattern: 'kafka.network<type=RequestMetrics, name=RequestsPerSec, request=(.+), version=(.+)><>Count'
+    name: kafka_network_requests_total
+    labels:
+      request: "$1"
+    type: COUNTER
+
+  # Latencia. Aquí es donde la cardinalidad se dispara si no se acota: el bean
+  # publica una decena de percentiles por cada uno de los ~20 tipos de petición.
+  # Sin los dos filtros de abajo, esta sola regla generaba 558 de las 617 series
+  # del exporter. Nos quedamos con los tipos que importan y tres percentiles.
+  - pattern: 'kafka.network<type=RequestMetrics, name=TotalTimeMs, request=(Produce|Fetch|FetchConsumer|FetchFollower)><>(50|95|99)thPercentile'
+    name: kafka_network_request_duration_ms
+    labels:
+      request: "$1"
+      quantile: "0.$2"
+    type: GAUGE
+
+  # Tamaño del log y último offset por partición. Base de la métrica de retraso
+  # que KEDA usará en F7.
+  - pattern: 'kafka.log<type=Log, name=(Size|LogEndOffset), topic=(.+), partition=(.+)><>Value'
+    name: kafka_log_$1
+    labels:
+      topic: "$2"
+      partition: "$3"
+    type: GAUGE
+
+  # Salud de la JVM del broker. Ojo al orden de las claves: en estos beans `name`
+  # va antes que `type`. Con el orden invertido, estas reglas no enganchan nada.
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage>(\w+)'
+    name: jvm_memory_heap_$1_bytes
+    type: GAUGE
+
+  - pattern: 'java.lang<name=(.+), type=GarbageCollector><>CollectionTime'
+    name: jvm_gc_collection_time_ms_total
+    labels:
+      gc: "$1"
+    type: COUNTER
+
+  - pattern: 'java.lang<name=(.+), type=GarbageCollector><>CollectionCount'
+    name: jvm_gc_collections_total
+    labels:
+      gc: "$1"
+    type: COUNTER

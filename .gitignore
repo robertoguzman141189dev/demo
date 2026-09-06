@@ -1,0 +1,42 @@
+# Java / Maven
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+*.tsbuildinfo
+
+# Terraform — el state nunca vive en el repo
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!example.tfvars
+crash.log
+
+# Secretos: si algo de esto llega a un commit, es un incidente
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# Datos locales de los brokers y de la observabilidad
+local/**/data/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# macOS
+.DS_Store

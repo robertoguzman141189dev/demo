@@ -1,0 +1,51 @@
+# Prometheus no recibe métricas: cada 15 s hace GET a /metrics de cada objetivo.
+# Los nombres de host son los de la red de Docker, no localhost: desde dentro de
+# este contenedor, localhost es el propio Prometheus.
+#
+# Si un panel sale vacío, el diagnóstico empieza en http://localhost:9090/targets
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    entorno: local
+
+scrape_configs:
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Expuesto por el plugin rabbitmq_prometheus, incluido en la distribución.
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+        labels:
+          broker: rabbitmq
+
+  # Expuesto por el JMX exporter que corre como javaagent dentro del broker.
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka:7071"]
+        labels:
+          broker: kafka
+
+  # Las aplicaciones de job-forge, cuando las corres fuera de Docker con
+  # `make run-api` y `make run-worker`. host.docker.internal es como Docker
+  # Desktop deja que un contenedor alcance a tu máquina; en Linux hace falta
+  # `--add-host=host.docker.internal:host-gateway`.
+  #
+  # Si aún no las has arrancado, aparecerán en rojo en /targets. Es correcto: el
+  # objetivo está declarado y nadie responde.
+  - job_name: job-forge
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          service: job-forge-api
+      - targets: ["host.docker.internal:8081"]
+        labels:
+          service: job-forge-worker
+      - targets: ["host.docker.internal:8082"]
+        labels:
+          service: job-forge-audit

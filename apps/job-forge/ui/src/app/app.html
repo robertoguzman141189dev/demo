@@ -1,0 +1,119 @@
+<header>
+  <div>
+    <h1>job-forge</h1>
+    <p class="claim">
+      La resiliencia en la entrega es un problema distinto al del throughput.
+      Rompe el sistema y mira cómo lo absorbe.
+    </p>
+  </div>
+  <span class="status" [class.on]="panel.connected()">
+    {{ panel.connected() ? 'en vivo' : 'sin conexión' }}
+  </span>
+</header>
+
+<section class="levers">
+  <h2>Palancas</h2>
+
+  <label>
+    Tareas
+    <input type="number" min="1" max="200" [(ngModel)]="tasks" />
+  </label>
+
+  <label>
+    Tasa de fallo del worker: <strong>{{ failProbability() }}%</strong>
+    <input type="range" min="0" max="100" step="5" [(ngModel)]="failProbability" />
+    <small>Viaja estampada en cada tarea, así que todas las réplicas aplican lo mismo.</small>
+  </label>
+
+  <label>
+    Prioridad
+    <select [(ngModel)]="priority">
+      <option value="NORMAL">normal</option>
+      <option value="HIGH">alta — adelanta a las normales</option>
+    </select>
+  </label>
+
+  <div class="actions">
+    <button type="button" (click)="generate()" [disabled]="busy()">Generar tareas</button>
+    <label class="file">
+      Subir archivo
+      <input type="file" (change)="upload($event)" [disabled]="busy()" />
+    </label>
+  </div>
+
+  @if (message()) {
+    <p class="message">{{ message() }}</p>
+  }
+</section>
+
+<section class="queues">
+  <h2>Colas</h2>
+  <p class="hint">
+    Las tres de espera no tienen consumidor: nadie las lee nunca. Su única función
+    es que el tiempo pase, y por eso el backoff no necesita ningún scheduler.
+  </p>
+
+  @for (queue of queueOrder; track queue) {
+    <div class="queue" [class.dead]="queue === 'jobs.dead'">
+      <span class="name">{{ queue }}</span>
+      <span class="bar"><span class="fill" [style.width.%]="depth(queue) * 4"></span></span>
+      <span class="count">{{ depth(queue) }}</span>
+    </div>
+  }
+</section>
+
+<section class="dead">
+  <h2>Cola muerta</h2>
+  <p class="hint">
+    Agotados los intentos, la tarea espera aquí una decisión humana. Reprocesar la
+    devuelve al circuito con el contador a cero.
+  </p>
+
+  <div class="actions">
+    <button type="button" (click)="panel.refreshDeadLetters()">Inspeccionar</button>
+    <button type="button" (click)="reprocess()" [disabled]="busy()">Reprocesar todas</button>
+  </div>
+
+  @if (panel.deadLetters().length === 0) {
+    <p class="empty">Nada muerto todavía. Sube la tasa de fallo.</p>
+  } @else {
+    <table>
+      <thead>
+        <tr><th>tarea</th><th>intentos</th><th>motivo</th></tr>
+      </thead>
+      <tbody>
+        @for (dead of panel.deadLetters(); track dead.taskId) {
+          <tr>
+            <td class="mono">{{ dead.taskId.slice(0, 8) }}</td>
+            <td>{{ dead.attempts }}</td>
+            <td>{{ dead.failureReason }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+</section>
+
+<section class="feed">
+  <h2>Lo que va pasando</h2>
+  <p class="hint">
+    Esto no observa a los workers: lee el log de auditoría que los workers
+    escriben. Por eso enseña lo mismo haya una réplica o veinte.
+  </p>
+
+  @for (event of panel.events(); track $index) {
+    <div class="event" [attr.data-type]="event.type">
+      <span class="type">{{ event.type }}</span>
+      <span class="mono">{{ event.taskId.slice(0, 8) }}</span>
+      <span class="attempt">intento {{ event.attempt }}</span>
+      <span class="detail">{{ event.detail }}</span>
+    </div>
+  } @empty {
+    <p class="empty">Sin actividad. Genera algunas tareas.</p>
+  }
+</section>
+
+<footer>
+  Datos sintéticos. Los archivos que subas no se almacenan: se leen, se parten en
+  tareas y se descartan antes de responderte.
+</footer>

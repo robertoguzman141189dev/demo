@@ -1,0 +1,18 @@
+# Provisioning: Grafana lee esto al arrancar y crea el datasource solo.
+# Nada de configurarlo a mano por la interfaz — eso no sobrevive a un make clean
+# y no queda en el repositorio.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # Nombre de servicio en la red de Docker, no localhost.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Debe coincidir con el scrape_interval de prometheus.yml, o los gráficos
+      # muestran huecos donde solo hay una consulta mal alineada.
+      timeInterval: 15s

@@ -1,0 +1,163 @@
+# Entorno local de event-lab: brokers vacíos y observabilidad.
+#
+# Esto NO se despliega. En el cluster los brokers los instala Helm en el
+# namespace platform. Aquí no se declara ni una cola ni un topic: la topología de
+# RabbitMQ nace en código con Spring AMQP (F1) y los topics de Kafka se crean
+# explícitamente (F3). Un broker que arranca con la topología ya puesta esconde
+# justo la parte que este repositorio quiere enseñar.
+
+name: event-lab
+
+services:
+
+  # ---------------------------------------------------------------- Kafka -----
+  # Un solo nodo con los dos roles: broker (guarda mensajes) y controller
+  # (mantiene por Raft el log de metadatos que antes vivía en ZooKeeper).
+  # En producción los controllers son un número impar >= 3; aquí es 1 porque el
+  # objetivo es aprender la configuración, no la tolerancia a fallos.
+  kafka:
+    build:
+      context: ./kafka
+      args:
+        JMX_AGENT_VERSION: 1.0.1
+    image: event-lab/kafka:4.3.1-jmx
+    container_name: kafka
+    restart: unless-stopped
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "29092:29092"   # bootstrap para clientes en tu máquina
+      - "7071:7071"     # /metrics del JMX exporter, útil para depurar a mano
+    environment:
+      # Identidad del nodo dentro del quórum de metadatos.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Identificador del cluster. Se estampa en el directorio de datos al
+      # formatearlo: si lo cambias con datos existentes, el nodo se niega a
+      # arrancar porque ese directorio pertenece a otro cluster.
+      CLUSTER_ID: 5L6g3nShT-eMCtK--X86sw
+
+      # Tres listeners con tres propósitos distintos. Este es el error clásico:
+      #   PLAINTEXT  -> clientes DENTRO de la red de Docker      (kafka:9092)
+      #   EXTERNAL   -> clientes en TU máquina                   (localhost:29092)
+      #   CONTROLLER -> tráfico de Raft entre controllers        (kafka:9093)
+      # advertised_listeners es la dirección que el broker le DICE al cliente que
+      # use. Si anuncias solo la interna, tu IDE conecta, pide metadatos, recibe
+      # "kafka:9092" y falla resolviendo un host que en tu máquina no existe.
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # Con un solo nodo no hay a quién replicar: factor 1 en los topics internos.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      # Sin espera artificial al formarse un grupo de consumidores: en local
+      # quieres ver el rebalance de inmediato.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Los topics se crean a propósito, con su número de particiones y su
+      # política de retención. Autocrearlos da topics de una partición y
+      # retención por defecto, que es justo lo contrario de lo que demostramos.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+
+      KAFKA_OPTS: -javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=7071:/opt/jmx/config.yml
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+      - ./kafka/jmx-exporter.yml:/opt/jmx/config.yml:ro
+    healthcheck:
+      # "El puerto responde" no basta: esto pregunta de verdad al broker por sus
+      # versiones de API, que es hablar el protocolo.
+      #
+      # KAFKA_OPTS= no es decorativo. Esa variable la aplica CUALQUIER script de
+      # bin/, no solo el broker: sin vaciarla, la JVM del healthcheck intenta
+      # cargar el mismo javaagent, choca contra el 7071 que ya tiene el broker y
+      # muere. Resultado: contenedor marcado unhealthy con el broker perfectamente
+      # sano. Mismo motivo en el objetivo `topics` del Makefile.
+      test: ["CMD-SHELL", "KAFKA_OPTS= /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # El volumen nace vacío y Docker lo crea como root, pero Kafka corre como uid
+  # 1000 y no podría escribir. Este contenedor efímero ajusta el propietario y
+  # sale. Es el mismo patrón que un initContainer en Kubernetes.
+  kafka-init:
+    image: busybox:1.37
+    container_name: kafka-init
+    command: ["sh", "-c", "mkdir -p /data && chown -R 1000:1000 /data"]
+    volumes:
+      - kafka-data:/data
+
+  # ------------------------------------------------------------- RabbitMQ -----
+  rabbitmq:
+    image: rabbitmq:4.3.5-management-alpine
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # consola de administración
+      - "15692:15692"   # /metrics de rabbitmq_prometheus, sin sidecar
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  # ----------------------------------------------------------- Prometheus -----
+  # Nadie le envía métricas: él hace GET a /metrics de cada objetivo cada 15 s.
+  # Si no ves datos, la respuesta está en http://localhost:9090/targets.
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    container_name: prometheus
+    restart: unless-stopped
+    depends_on:
+      - kafka
+      - rabbitmq
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=6h
+      - --web.enable-lifecycle
+
+  # -------------------------------------------------------------- Grafana -----
+  grafana:
+    image: grafana/grafana:13.2.1
+    container_name: grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Acceso anónimo de solo lectura: el panel público de F7 no pide login.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  kafka-data:
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:

@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: job-forge-audit
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      # Un proyector nuevo tiene que leer la historia entera, no solo lo que llegue
+      # a partir de ahora: el estado se deriva de todo el log.
+      auto-offset-reset: earliest
+      properties:
+        # El tipo se fija aquí y no viaja en el mensaje, igual que en AMQP.
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.eventlab.jobforge.contracts.audit.JobEvent
+
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+server:
+  port: ${SERVER_PORT:8082}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    tags:
+      application: job-forge-audit
+
+job-forge:
+  audit:
+    # Cambiar este identificador hace que el proyector vuelva a leer el log desde
+    # el principio: es la forma de reconstruir el estado desde cero.
+    group-id: job-forge-audit-projector
+
+logging:
+  level:
+    com.eventlab.jobforge: INFO
