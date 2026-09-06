@@ -110,27 +110,37 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.rabbitmq.credentialsSecret }}
                   key: {{ .Values.rabbitmq.passwordKey }}
-          # Arrancar un broker de Erlang no es instantáneo. El startupProbe le da
-          # margen y mantiene las otras dos sondas suspendidas mientras tanto.
+          # OJO con el coste de las sondas exec en este broker: cada invocación de
+          # rabbitmq-diagnostics arranca una VM de Erlang entera. Es una sonda
+          # cara, y ponerla cada pocos segundos durante el arranque hace que el
+          # nodo se pelee consigo mismo: cuanto más tarda en levantar, más VMs se
+          # le lanzan encima, y más tarda. Verificado en kind, donde esa
+          # combinación mantuvo la máquina en carga alta sostenida.
+          #
+          # Por eso el startupProbe es un tcpSocket, que no cuesta nada: mientras
+          # el broker arranca solo se comprueba que el puerto AMQP esté abierto.
           startupProbe:
-            exec:
-              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            tcpSocket:
+              port: amqp
             periodSeconds: 5
-            failureThreshold: 24
-          # check_running pregunta de verdad al broker si está sirviendo, no si
-          # el puerto acepta conexiones.
+            failureThreshold: 36
+          # Ya arrancado, sí interesa preguntar de verdad: check_running consulta
+          # al broker si está sirviendo, no si el puerto acepta conexiones. Se
+          # paga el coste de la VM de Erlang una vez cada 30 segundos, no cada 5.
           readinessProbe:
             exec:
               command: ["rabbitmq-diagnostics", "-q", "check_running"]
-            periodSeconds: 10
-            timeoutSeconds: 10
-            failureThreshold: 3
-          livenessProbe:
-            exec:
-              command: ["rabbitmq-diagnostics", "-q", "ping"]
             periodSeconds: 30
             timeoutSeconds: 15
             failureThreshold: 3
+          # La liveness vuelve al tcpSocket: si el proceso está colgado de verdad,
+          # deja de aceptar conexiones. No hace falta pagar otra VM de Erlang cada
+          # minuto para averiguarlo.
+          livenessProbe:
+            tcpSocket:
+              port: amqp
+            periodSeconds: 30
+            failureThreshold: 4
           resources:
             {{- toYaml .Values.rabbitmq.resources | nindent 12 }}
           securityContext:

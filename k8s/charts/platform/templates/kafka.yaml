@@ -143,14 +143,20 @@ spec:
             failureThreshold: 36
           # "El puerto responde" no basta para un broker: esto le pregunta por sus
           # versiones de API, que es hablar el protocolo de verdad.
+          #
+          # Pero cada invocación arranca una JVM entera, igual que
+          # rabbitmq-diagnostics arranca una VM de Erlang. Por eso el periodo es
+          # de 30 segundos y no de 15: la sonda cara se paga la mitad de veces, y
+          # el startupProbe de arriba —que es un tcpSocket y no cuesta nada— se
+          # ocupa de todo el arranque, que es cuando el nodo va más justo.
           readinessProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
                 - /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1
-            periodSeconds: 15
-            timeoutSeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 20
             failureThreshold: 3
           livenessProbe:
             tcpSocket:
