@@ -97,6 +97,14 @@ kind-up: ## Crea el cluster local de kind
 kind-ingress: ## Instala el controlador de Ingress y espera a que esté listo
 	$(KUBECTL) apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/$(INGRESS_NGINX_VERSION)/deploy/static/provider/kind/deploy.yaml
 	$(KUBECTL) -n ingress-nginx wait --for=condition=Available deployment/ingress-nginx-controller --timeout=300s
+	# Esperar al Deployment NO basta, y esto cuesta un despliegue fallido
+	# aprenderlo: ingress-nginx registra un webhook de admisión que valida cada
+	# Ingress que se crea. El Deployment puede figurar como Available mientras el
+	# endpoint del webhook todavía rechaza conexiones, y entonces el helm install
+	# del chart muere con un "failed calling webhook ... connection refused" que
+	# no menciona por ningún lado que el problema sea de arranque.
+	$(KUBECTL) -n ingress-nginx wait --for=condition=Ready pod \
+		--selector=app.kubernetes.io/component=controller --timeout=300s
 
 # La contraseña se genera aquí y no se escribe en ningún archivo del repositorio.
 # En AWS este Secret lo materializa External Secrets desde Secrets Manager; el

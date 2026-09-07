@@ -55,7 +55,11 @@ audit:
       cpu: 100m
       memory: 320Mi
     limits:
-      cpu: 500m
+      # Un núcleo, igual que api y worker. Con 500m la JVM tardaba tanto en
+      # arrancar que agotaba el startupProbe y el kubelet la reiniciaba en bucle.
+      # Recortar CPU a un proceso Java penaliza sobre todo el arranque, que es
+      # cuando más trabajo de compilación JIT y carga de clases hay.
+      cpu: "1"
       memory: 320Mi
 
 ui:

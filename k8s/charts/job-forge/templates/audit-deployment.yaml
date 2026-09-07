@@ -41,12 +41,21 @@ spec:
               containerPort: 8080
           env:
             {{- include "job-forge.brokerEnv" . | nindent 12 }}
+          # Tres minutos de margen, no noventa segundos. Con 90s este contenedor
+          # entraba en un bucle de reinicios en kind: la JVM tardaba más que el
+          # presupuesto, el kubelet la mataba, y el reinicio volvía a empezar de
+          # cero compitiendo por la misma CPU. Un startupProbe demasiado corto no
+          # detecta un arranque lento, lo convierte en un arranque imposible.
+          #
+          # Ser generoso aquí no relaja nada: mientras el startupProbe no pase,
+          # readiness y liveness siguen suspendidas, y en cuanto pasa vuelven a
+          # ser tan estrictas como siempre.
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: http
             periodSeconds: 3
-            failureThreshold: 30
+            failureThreshold: 60
           # El grupo readiness de audit incluye kafkaConsumerAssignment: este pod
           # no se declara listo mientras no tenga particiones asignadas. Un
           # consumidor puede estar arrancado y con cero particiones durante un
