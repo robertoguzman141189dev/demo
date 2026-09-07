@@ -161,6 +161,33 @@ La excepción queda escrita en el propio manifiesto, no escondida.
   dejaría dos sitios donde se decide el enrutado, y F7 tiene que poner el rate
   limiting en uno solo.
 
+## Lo que solo apareció desplegando
+
+Tres fallos que ningún `helm lint` habría encontrado, y que justifican por qué
+esta fase exige un cluster de verdad y no solo manifiestos que renderizan:
+
+1. **Las sondas caras se pelean con el arranque.** Cada `rabbitmq-diagnostics`
+   arranca una VM de Erlang y cada `kafka-broker-api-versions.sh` una JVM.
+   Puestas cada pocos segundos durante el arranque, cuanto más tarda el broker en
+   levantar, más procesos pesados se le echan encima, y más tarda. Arranque y
+   liveness pasan a `tcpSocket`; la sonda cara solo corre ya arrancado.
+2. **Un `startupProbe` corto convierte un arranque lento en uno imposible.**
+   `audit`, con 90 s de presupuesto y la CPU recortada a 500m, no llegaba: el
+   kubelet lo mataba y el reinicio volvía a empezar de cero compitiendo por la
+   misma CPU. Ser generoso en el arranque no relaja nada, porque hasta que el
+   `startupProbe` no pasa las otras dos sondas están suspendidas.
+3. **Esperar a que un Deployment esté `Available` no es esperar a que sirva.**
+   ingress-nginx registra un webhook de admisión que valida cada `Ingress`; el
+   Deployment figuraba como disponible mientras el endpoint del webhook aún
+   rechazaba conexiones, y el `helm install` moría con un error que no menciona
+   por ningún lado que el problema fuera de arranque.
+
+Y una advertencia de operación: **no mezclar `kubectl scale` con Helm.** Al
+escalar a mano, el gestor de campos `kubectl` se queda con la propiedad de
+`.spec.replicas`, y el siguiente `helm upgrade` falla con un conflicto de
+server-side apply. Se arregla devolviendo el valor al que espera el chart, pero
+es un rato de desconcierto.
+
 ## Consecuencias
 
 - `k8s/charts/` y `k8s/overlays/local/` nacen aquí. `k8s/overlays/prod/` y
@@ -169,6 +196,16 @@ La excepción queda escrita en el propio manifiesto, no escondida.
   values del entorno no lo trae. Verificado.
 - `audit.replicas` mayor que 3 hace fallar el renderizado con un mensaje que
   explica el porqué. Verificado.
-- La pregunta abierta que dejó el ADR 004 —si perder la conexión agota
-  `x-delivery-limit`— se responde en la verificación de esta misma fase, matando
-  pods de verdad.
+- La readiness de `audit` responde con las particiones asignadas —
+  `["trabajos.eventos-0","trabajos.eventos-1","trabajos.eventos-2"]`— en vez de un
+  `UP` sin contenido. Verificado en el cluster.
+- El worker reconstruye su estado desde el topic compactado antes de consumir y
+  no se declara listo hasta terminar. Verificado: tras varios reinicios,
+  `worker listo: 13 tareas completadas recuperadas`.
+- **La pregunta abierta del ADR 004 queda respondida: sí, perder la conexión
+  agota `x-delivery-limit`.** Con el límite en 5, el mensaje sobrevivió a cinco
+  muertes del pod y en la sexta entrega acabó en `jobs.dead`. El detalle está en
+  el propio ADR 004.
+- Este cluster no cabe a la vez que el `docker-compose` local en una máquina de
+  16 GB: los dos levantan sus propios brokers dentro de la misma VM de Docker.
+  Hay que elegir uno. El README lo advierte.

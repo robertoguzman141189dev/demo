@@ -51,6 +51,9 @@ spec:
               containerPort: 8080
           env:
             {{- include "job-forge.brokerEnv" . | nindent 12 }}
+            {{- with $svc.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           # Sin preStop, y no por olvido: el worker no está detrás de ningún
           # Service que le mande trabajo. Va él a buscarlo a jobs.work. La
           # ventana entre el SIGTERM y la salida de los endpoints, que al api sí

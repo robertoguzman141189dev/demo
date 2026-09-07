@@ -95,19 +95,45 @@ De ahí se derivan cuatro decisiones más:
 - El apagado ordenado está configurado, pero **sin verificar**: se comprobará en F5
   con el pod real y su periodo de gracia.
 
-## Pregunta abierta
+## Pregunta abierta — resuelta en F5
 
-Queda sin resolver si perder la conexión agota `x-delivery-limit`. Lo medido:
+**Sí: perder la conexión agota `x-delivery-limit`.** Medido el 2026-09-06 en un
+cluster de kind con RabbitMQ 4.3.5, matando pods de verdad.
+
+Lo que ya se sabía:
 
 - Reencolar con un `nack` **no** lo agota. El broker incrementa
   `x-acquired-count`; el mensaje sobrevivió a más de 11 000 reencolados (ADR 003).
 - Cortando la conexión desde el broker con `rabbitmqctl`, el mensaje sin acusar
-  **sí vuelve a la cola** y se reentrega. Eso está verificado en
-  `WorkerRedeliveryIT`.
-- No se consiguió reproducir de forma fiable una secuencia de varias caídas sobre
-  la misma tarea, así que **no se puede afirmar** que el límite acabe apartándola.
+  **sí vuelve a la cola** y se reentrega (`WorkerRedeliveryIT`).
 
-El argumento se mantiene declarado porque no cuesta nada y el comportamiento
-esperado es el correcto, pero hasta verificarlo no debe presentarse como una
-defensa real. Se comprobará en F5, matando pods de verdad, que es donde el caso
-ocurre.
+El experimento que faltaba: una sola tarea, un solo worker, la duración de la
+tarea subida a 45 s para tener margen, y `kubectl delete pod --force
+--grace-period=0` a los 10 s de empezarla. Es decir, el pod muere con el mensaje
+cogido y sin acusar, que es exactamente el caso que `x-delivery-limit` cubre.
+
+Con el límite en 5, el resultado por rondas:
+
+| Ronda | Tras matar el pod            |
+|-------|------------------------------|
+| 1     | `jobs.work=1`, `jobs.dead=0` |
+| 2     | `jobs.work=1`, `jobs.dead=0` |
+| 3     | `jobs.work=1`, `jobs.dead=0` |
+| 4     | `jobs.work=1`, `jobs.dead=0` |
+| 5     | `jobs.work=1`, `jobs.dead=0` |
+| **6** | **`jobs.work=0`, `jobs.dead=1`** |
+
+El mensaje sobrevivió a cinco pérdidas de conexión y en la sexta entrega fue
+apartado a la cola de muertos. El límite es, por tanto, una defensa real contra
+el worker que muere en bucle, y no solo una declaración decorativa.
+
+**Un matiz que el experimento destapó y que conviene tener presente:** el mensaje
+llega a `jobs.dead` con `attempts: 0` y `failureReason: null`. Tiene sentido —el
+header `x-attempt` solo lo incrementa el worker al republicar tras un fallo de
+negocio, y aquí nunca hubo ninguno—, pero significa que **el panel no distingue
+"murió porque el worker se caía una y otra vez" de "nunca llegó a intentarse"**.
+Son dos incidentes muy distintos y ahora mismo se ven iguales. Queda anotado como
+mejora del panel; no se arregla aquí para no ampliar el alcance de F5.
+
+Con esto, el apagado ordenado y la reentrega quedan verificados sobre pods
+reales, que es lo que esta sección pedía.

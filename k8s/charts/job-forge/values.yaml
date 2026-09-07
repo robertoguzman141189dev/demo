@@ -104,6 +104,11 @@ worker:
   # (ADR 005) y no se declara listo hasta terminar. Su state-rebuild-timeout son
   # 60s: la readiness tiene que tolerar esa espera sin que nadie lo mate.
   stateRebuildSeconds: 60
+  # Variables adicionales, en formato de lista env de Kubernetes. Existe para
+  # poder torcer el comportamiento del worker en un experimento sin tocar el
+  # chart: alargar la duración de la tarea para poder matar el pod a media
+  # faena, por ejemplo. En prod se deja vacío.
+  extraEnv: []
 
 # ------------------------------------------------------------------- audit ---
 audit:

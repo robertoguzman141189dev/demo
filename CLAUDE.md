@@ -224,7 +224,7 @@ y `stream-guard` después, reutilizando toda la infraestructura.
 | F2 | Productor de tareas y worker con fallo inyectable | hecho |
 | F3 | Auditoría en Kafka y reconstrucción de estado desde el compactado | hecho |
 | F4 | Panel Angular con palancas y WebSocket | hecho |
-| F5 | Dockerfiles, Helm charts, despliegue en kind | pendiente |
+| F5 | Dockerfiles, Helm charts, despliegue en kind | hecho |
 | F6 | Terraform (EKS y EC2/k3s), Argo CD, GitHub Actions con OIDC | pendiente |
 | F7 | KEDA, dashboards de Grafana, blindaje del endpoint público | pendiente |
 | F8+ | `stream-guard`, mismas fases sobre la infra ya montada | pendiente |
@@ -249,9 +249,15 @@ Están documentadas en `docs/adr/`. Resumen:
   Cierra la limitación del registro en memoria que dejó F2.
 - **ADR 004** — Publicar, confirmar y solo entonces acusar. Acuse manual, prefetch
   1, la palanca de fallo en el header y la deduplicación en memoria con su
-  limitación escrita. Deja una **pregunta abierta**: si perder la conexión agota
-  `x-delivery-limit`. Verificado que la tarea vuelve a la cola; no verificado que
-  el límite acabe apartándola. Se comprueba en F5 matando pods de verdad.
+  limitación escrita. Su pregunta abierta quedó **resuelta en F5**: sí, perder la
+  conexión agota `x-delivery-limit`. Con el límite en 5, el mensaje sobrevivió a
+  cinco muertes del pod y en la sexta entrega acabó en `jobs.dead`.
+- **ADR 007** — Empaquetado y endurecimiento. Base alpine con shell a cambio de
+  poder depurar, un Dockerfile parametrizado para los tres servicios Java, la
+  cadena de plazos del apagado, y los tres fallos que solo aparecieron
+  desplegando: sondas caras que se pelean con el arranque, un `startupProbe`
+  corto que convierte un arranque lento en imposible, y que esperar a que un
+  Deployment esté `Available` no es esperar a que sirva.
 
 ## 11. Estructura del repositorio
 

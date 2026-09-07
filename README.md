@@ -75,9 +75,12 @@ Crea un cluster local con kind, construye las cuatro imágenes, las carga en el
 nodo y despliega los dos charts. Al terminar, el panel queda en
 http://job-forge.localtest.me.
 
-Necesita Docker, `kind` y `helm`. Pide bastante memoria: son dos brokers y cuatro
-servicios dentro de una sola máquina virtual, así que conviene cerrar lo que no
-estés usando. `make kind-down` lo borra todo y no deja rastro.
+Necesita Docker, `kind` y `helm`. `make kind-down` lo borra todo y no deja rastro.
+
+**Es esto o `make demo`, no los dos a la vez.** Cada uno levanta su propio par de
+brokers, y los dos viven dentro de la misma máquina virtual de Docker. En un
+portátil de 16 GB, tenerlos encendidos a la vez satura la VM y el cluster deja de
+responder. Antes de `make k8s`, un `make down`.
 
 ## Aviso
 
