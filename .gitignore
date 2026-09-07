@@ -38,5 +38,12 @@ local/**/data/
 .project
 .classpath
 
+# Claude Code: ajustes de tu máquina y worktrees de sesión. El worktree es una
+# copia entera del repositorio; si entra en un commit, el repo acaba duplicado
+# dentro de sí mismo. Se ignoran solo estos dos: un .claude/settings.json
+# compartido sí tendría sentido versionarlo el día que exista.
+.claude/settings.local.json
+.claude/worktrees/
+
 # macOS
 .DS_Store
