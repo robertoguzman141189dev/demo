@@ -18,6 +18,26 @@ HELM := helm --kube-context kind-$(KIND_CLUSTER)
 INGRESS_NGINX_VERSION := controller-v1.15.1
 IMAGES := api worker audit ui
 
+# ----------------------------------------------------------- F6: terraform ---
+# El perfil de AWS va SIEMPRE explicito, y no es paranoia: el perfil [default] de
+# esta maquina puede apuntar a otra cuenta, y un comando sin --profile se iria
+# ahi sin avisar ni preguntar. Se sobreescribe con `make AWS_PROFILE=otro ...`.
+#
+# En CI no existe ningun perfil: las credenciales llegan por OIDC en variables de
+# entorno, y por eso el bloque provider de Terraform NO fija el perfil. Solo lo
+# fija esto, que es la envoltura local.
+AWS_PROFILE ?= event-lab
+TF := AWS_PROFILE=$(AWS_PROFILE) terraform
+
+# El nombre del bucket lo imprime bootstrap; se lee de ahi en vez de copiarse a
+# mano. Si bootstrap no esta aplicado todavia, queda vacio y los objetivos que lo
+# necesitan avisan en vez de fallar de forma confusa.
+TF_STATE_BUCKET = $(shell AWS_PROFILE=$(AWS_PROFILE) terraform -chdir=terraform/bootstrap output -raw state_bucket 2>/dev/null)
+
+# Correo de las alertas de gasto. Sin valor por defecto: no se escribe en el
+# repositorio, que es publico.
+BUDGET_ALERT_EMAIL ?=
+
 # --------------------------------------------------------------- F6: argo ---
 # Version del chart de Argo CD, fijada. Un agente de GitOps que se actualiza solo
 # puede cambiar como se sincroniza todo lo demas sin que nadie toque el repositorio.
@@ -26,7 +46,9 @@ ARGOCD_CHART_VERSION := 9.1.7
 .DEFAULT_GOAL := help
 .PHONY: help demo up down restart ps logs topics urls clean nuke build test verify run-api run-worker run-audit run-ui estado \
         kind-up kind-down kind-ingress kind-secret images kind-load deploy k8s k8s-status k8s-urls \
-        argocd-install argocd-bootstrap argocd-password argocd-ui argocd-status
+        argocd-install argocd-bootstrap argocd-password argocd-ui argocd-status \
+        aws-quien tf-fmt tf-bootstrap tf-outputs tf-demo-plan tf-demo-apply tf-demo-destroy \
+        tf-lab-plan tf-lab-apply tf-lab-destroy
 
 help: ## Lista los objetivos disponibles
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -159,6 +181,56 @@ k8s-urls: ## Dónde entrar una vez desplegado
 
 kind-down: ## Borra el cluster de kind entero
 	kind delete cluster --name $(KIND_CLUSTER)
+
+# ----------------------------------------------------------- F6: Terraform ---
+# Ningun objetivo de aqui aplica nada sin que lo pidas por su nombre. El orden es
+# tf-bootstrap una vez, y despues demo o laboratorio segun toque.
+
+aws-quien: ## Contra que cuenta e identidad estas trabajando
+	@AWS_PROFILE=$(AWS_PROFILE) aws sts get-caller-identity
+
+tf-fmt: ## Formatea y valida todos los modulos
+	terraform -chdir=terraform fmt -recursive
+	$(TF) -chdir=terraform/bootstrap validate
+
+# Se aplica UNA vez y crea lo que sobrevive a todo: el bucket del estado, la
+# alerta de gasto, los repositorios de imagenes y los roles de OIDC. Su propio
+# estado se queda en local, porque es quien crea el sitio donde guardarlo.
+tf-bootstrap: ## Crea estado, alerta de gasto, ECR y roles de OIDC (coste ~0)
+	@test -n "$(BUDGET_ALERT_EMAIL)" || { \
+	  echo "Falta BUDGET_ALERT_EMAIL. Uso: make tf-bootstrap BUDGET_ALERT_EMAIL=tu@correo"; \
+	  exit 1; }
+	$(TF) -chdir=terraform/bootstrap init -input=false
+	$(TF) -chdir=terraform/bootstrap apply -var="alert_email=$(BUDGET_ALERT_EMAIL)"
+
+tf-outputs: ## Valores que hay que dar de alta en GitHub
+	@$(TF) -chdir=terraform/bootstrap output
+
+# --- demo publico: encendido de continuo, unos 30 USD/mes ---
+
+tf-demo-plan: ## Plan del demo publico en k3s
+	@test -n "$(TF_STATE_BUCKET)" || { echo "Aplica primero: make tf-bootstrap"; exit 1; }
+	$(TF) -chdir=terraform/aws-ec2-k3s init -input=false -backend-config="bucket=$(TF_STATE_BUCKET)"
+	$(TF) -chdir=terraform/aws-ec2-k3s plan
+
+tf-demo-apply: ## Levanta el demo publico. EMPIEZA A FACTURAR
+	$(TF) -chdir=terraform/aws-ec2-k3s apply
+
+tf-demo-destroy: ## Apaga el demo publico
+	$(TF) -chdir=terraform/aws-ec2-k3s destroy
+
+# --- laboratorio: EFIMERO. ~0,17 USD/hora, ~122 al mes si se olvida ---
+
+tf-lab-plan: ## Plan del cluster de EKS
+	@test -n "$(TF_STATE_BUCKET)" || { echo "Aplica primero: make tf-bootstrap"; exit 1; }
+	$(TF) -chdir=terraform/aws-eks init -input=false -backend-config="bucket=$(TF_STATE_BUCKET)"
+	$(TF) -chdir=terraform/aws-eks plan
+
+tf-lab-apply: ## Levanta EKS. ~0,17 USD/h: acuerdate de tf-lab-destroy
+	$(TF) -chdir=terraform/aws-eks apply
+
+tf-lab-destroy: ## Destruye EKS y para la factura
+	$(TF) -chdir=terraform/aws-eks destroy
 
 # ------------------------------------------------------------- F6: Argo CD ---
 # Estos objetivos usan el contexto de kubectl ACTIVO, no el de kind, porque valen
