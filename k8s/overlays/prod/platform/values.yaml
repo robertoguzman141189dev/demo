@@ -1,0 +1,31 @@
+# Values de los brokers en producción: el nodo k3s del demo público.
+#
+# El reparto de memoria de esta máquina es el que manda. Una t4g.medium son 4 GiB
+# para todo: k3s, los dos brokers, el controlador de Ingress y los cuatro
+# servicios. No hay sitio para valores cómodos.
+
+kafka:
+  # Heap deliberadamente pequeño. Kafka se apoya en la caché de página del
+  # sistema operativo, que vive fuera del heap: darle más heap en una máquina
+  # apretada lo hace más lento, no más rápido, porque se la roba a la caché.
+  heapOpts: "-Xmx320m -Xms320m"
+  resources:
+    requests:
+      cpu: 150m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+  storage:
+    size: 4Gi
+
+rabbitmq:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 320Mi
+    limits:
+      cpu: 500m
+      memory: 448Mi
+  storage:
+    size: 2Gi

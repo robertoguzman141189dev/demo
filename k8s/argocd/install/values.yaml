@@ -1,0 +1,90 @@
+# Values del chart de Argo CD.
+#
+# Argo CD es lo único de este repositorio que se instala con `helm install` a
+# mano contra el cluster, y tiene que ser así: alguien tiene que poner al primer
+# agente de GitOps dentro. A partir de ahí, todo lo demás lo despliega él.
+#
+# Está recortado para caber en el nodo del demo, que es una t4g.medium de 4 GiB
+# compartidos con dos brokers y cuatro servicios. La instalación por defecto pide
+# bastante más de lo que sobra ahí.
+
+global:
+  # El nodo del demo es ARM. El chart soporta las dos arquitecturas, pero
+  # dejarlo explícito evita un pod en Pending sin explicación evidente si algún
+  # día se mezclan nodos.
+  nodeSelector:
+    kubernetes.io/arch: arm64
+
+# La interfaz NO se expone. No hay Ingress y el Service es ClusterIP.
+#
+# Es una decisión de seguridad, no una omisión: el nodo del demo tiene los
+# puertos 80 y 443 abiertos al mundo entero, y quien controla Argo CD controla
+# todo lo que se despliega en el cluster. Se accede por port-forward a través de
+# una sesión de SSM, que ya exige estar autenticado contra AWS.
+server:
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: false
+  # El servidor termina TLS por su cuenta y detrás no hay nadie que lo haga por
+  # él; en modo inseguro sirve HTTP plano, que es lo correcto cuando se llega por
+  # un túnel local y no por la red.
+  extraArgs:
+    - --insecure
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      memory: 384Mi
+
+# Dex traduce identidades de proveedores externos —Google, GitHub, LDAP— a
+# usuarios de Argo. Aquí no hay más usuario que el administrador local, así que
+# es un pod consumiendo memoria para nada.
+dex:
+  enabled: false
+
+# Manda avisos a Slack, correo o webhooks cuando cambia el estado de una
+# sincronización. Útil en un equipo; aquí, memoria gastada.
+notifications:
+  enabled: false
+
+# Genera Applications a partir de plantillas, por ejemplo una por cada rama o por
+# cada cluster. Con dos demos escritos a mano no aporta nada todavía. Cuando
+# llegue stream-guard puede tener sentido reconsiderarlo.
+applicationSet:
+  enabled: false
+
+redis:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+configs:
+  params:
+    # Mismo motivo que el --insecure de arriba, en la forma que espera el chart.
+    server.insecure: true
+  cm:
+    # Cada cuánto comprueba el repositorio. Por defecto son 3 minutos; 1 hace el
+    # demo más vistoso —se ve el efecto de un commit casi al momento— a cambio de
+    # más llamadas a GitHub, que aquí no es problema.
+    timeout.reconciliation: 60s

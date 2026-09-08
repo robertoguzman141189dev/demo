@@ -1,0 +1,67 @@
+# El controlador de Ingress.
+#
+# Existe como Application porque el chart de job-forge declara un Ingress con
+# ingressClassName: nginx, y sin controlador ese Ingress se queda creado y sin
+# efecto: no da error, simplemente nadie atiende.
+#
+# En k3s hay que desplegarlo a mano porque el user_data desactiva Traefik, que es
+# el que traía k3s por defecto. Dos controladores peleándose por el puerto 80 dan
+# un fallo bastante opaco, así que se elige uno: el mismo que se probó en kind y
+# el que llevará el rate limiting del endpoint público en F7.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-nginx
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: event-lab
+
+  source:
+    repoURL: https://kubernetes.github.io/ingress-nginx
+    chart: ingress-nginx
+    # Versión fijada, no un rango. Un controlador de Ingress que se actualiza
+    # solo puede cambiar el comportamiento del enrutado sin que nadie toque el
+    # repositorio, y eso es justo lo que GitOps existe para impedir.
+    targetRevision: 4.14.1
+    helm:
+      values: |
+        controller:
+          # En k3s, el servicelb que trae de serie ata este Service a los puertos
+          # 80 y 443 del nodo. Es lo que evita pagar un balanceador de AWS, que
+          # costaria mas que la propia instancia.
+          service:
+            type: LoadBalancer
+          # Una sola replica: es un nodo. Con dos, la segunda quedaria en Pending
+          # por el antiafinidad y la Application nunca se pondria verde.
+          replicaCount: 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 192Mi
+          # El panel mantiene un WebSocket abierto para el tiempo real (ADR 006).
+          # Con los timeouts por defecto el socket se cae cada minuto y el panel
+          # parece parpadear sin motivo.
+          config:
+            proxy-read-timeout: "3600"
+            proxy-send-timeout: "3600"
+          # Sin metricas todavia: las enciende F7, junto con los dashboards.
+          metrics:
+            enabled: false
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # El chart trae CRD y webhooks grandes; sin apply del lado del servidor,
+      # algunos superan el límite de la anotación last-applied-configuration.
+      - ServerSideApply=true

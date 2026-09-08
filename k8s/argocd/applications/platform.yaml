@@ -1,0 +1,75 @@
+# Los brokers.
+#
+# Esta Application se distingue de las otras dos en una cosa, y es deliberada:
+# NO tiene prune.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+  # Sin esta anotación, borrar la Application deja los recursos huérfanos en el
+  # cluster. Con ella, borrarla los limpia. Se pone a conciencia: aquí hay
+  # StatefulSets con datos.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: event-lab
+
+  # Dos orígenes, aunque los dos apunten al mismo repositorio.
+  #
+  # El chart vive en k8s/charts/platform y sus values en k8s/overlays/prod/. Argo
+  # no permite que un valueFile salga del directorio de la aplicación con ../,
+  # por seguridad, así que la forma correcta de referenciar values que viven en
+  # otra ruta es declarar un segundo origen con `ref` y apuntarlo con $values.
+  #
+  # Es lo que permite tener UN chart y un values por entorno, en vez de un chart
+  # duplicado por entorno (ADR 002).
+  sources:
+    - repoURL: https://github.com/robertoguzman141189dev/demo.git
+      targetRevision: main
+      path: k8s/charts/platform
+      helm:
+        valueFiles:
+          - $values/k8s/overlays/prod/platform/values.yaml
+    - repoURL: https://github.com/robertoguzman141189dev/demo.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform
+
+  syncPolicy:
+    automated:
+      # Revierte lo que alguien cambie a mano. Conviene saber que está puesto:
+      # un arreglo urgente aplicado con kubectl dura hasta la siguiente
+      # sincronización, y a las tres de la mañana eso desconcierta mucho.
+      selfHeal: true
+      # prune DESACTIVADO, y es la decisión importante de este archivo.
+      #
+      # Argo borra lo que desaparece del repositorio. Aplicado a un StatefulSet,
+      # eso puede llevarse por delante un PersistentVolumeClaim, y un PVC borrado
+      # son datos perdidos sin vuelta atrás. En los brokers se prefiere quedarse
+      # con recursos huérfanos —visibles, molestos, recuperables— antes que con
+      # un borrado silencioso.
+      prune: false
+    syncOptions:
+      - CreateNamespace=true
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
+  # volumeClaimTemplates es inmutable en un StatefulSet: en cuanto el chart y el
+  # cluster discrepan ahí, Argo marca la aplicación como desviada para siempre y
+  # ninguna sincronización lo arregla. Se ignora esa diferencia a propósito;
+  # cambiar el tamaño del disco exige borrar el StatefulSet conservando los PVC,
+  # y eso es una operación consciente, no algo que deba intentar Argo solo.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/volumeClaimTemplates

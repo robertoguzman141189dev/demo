@@ -1,0 +1,42 @@
+# La aplicación raíz: el patrón "app of apps".
+#
+# Es una Application cuyo contenido son otras Applications. Se aplica UNA vez a
+# mano y a partir de ahí Argo CD descubre solo todo lo que haya en
+# k8s/argocd/applications/: añadir un demo nuevo es añadir un archivo y hacer
+# commit, sin volver a tocar el cluster.
+#
+# Esto es lo que cierra el círculo de GitOps. Después de aplicar esto, el único
+# `kubectl apply` que este proyecto ejecuta contra el cluster es este.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: event-lab
+
+  source:
+    repoURL: https://github.com/robertoguzman141189dev/demo.git
+    targetRevision: main
+    path: k8s/argocd/applications
+    directory:
+      # Solo los archivos de ese directorio, sin bajar a subdirectorios. Evita
+      # que Argo intente interpretar como manifiesto cualquier cosa que acabe
+      # colgando por debajo.
+      recurse: false
+
+  destination:
+    server: https://kubernetes.default.svc
+    # Las Applications viven en el namespace de Argo, no en el de la aplicación
+    # que despliegan.
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      # prune activado aquí sí: si se borra el archivo de una Application, esa
+      # Application debe desaparecer. Lo que pase con SUS recursos lo decide su
+      # propia política de prune, no esta.
+      prune: true
+      selfHeal: true

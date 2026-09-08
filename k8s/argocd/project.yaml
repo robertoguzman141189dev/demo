@@ -1,0 +1,57 @@
+# El proyecto: la valla alrededor de lo que Argo CD puede hacer.
+#
+# Sin un AppProject propio, todo cae en el proyecto "default", que por defecto
+# permite desplegar cualquier cosa, en cualquier namespace, desde cualquier
+# repositorio. Es cómodo y es exactamente el problema: una Application mal
+# escrita —o un repositorio comprometido— puede crear un ClusterRoleBinding y
+# quedarse con el cluster.
+#
+# Esto no protege de un atacante que ya controle Argo CD. Protege del error
+# honesto y limita el radio de un repositorio comprometido, que es la amenaza
+# realista aquí.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: event-lab
+  namespace: argocd
+spec:
+  description: Los dos demos de event-lab y la plataforma que comparten
+
+  # De dónde se puede desplegar. Nada más que estos dos orígenes.
+  sourceRepos:
+    - https://github.com/robertoguzman141189dev/demo.git
+    - https://kubernetes.github.io/ingress-nginx
+
+  # A dónde. El namespace de cada demo, el de los brokers y el del Ingress; no el
+  # de kube-system, y no un comodín.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: job-forge
+    - server: https://kubernetes.default.svc
+      namespace: platform
+    - server: https://kubernetes.default.svc
+      namespace: ingress-nginx
+
+  # Recursos de ámbito de cluster permitidos. La lista es corta a propósito:
+  # ingress-nginx necesita crear su IngressClass y sus roles, y ahí se acaba.
+  # Todo lo que no esté aquí, Argo se niega a crearlo aunque el chart lo pida.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: networking.k8s.io
+      kind: IngressClass
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+    - group: storage.k8s.io
+      kind: StorageClass
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+
+  # Dentro de los namespaces permitidos, cualquier recurso.
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

@@ -18,9 +18,15 @@ HELM := helm --kube-context kind-$(KIND_CLUSTER)
 INGRESS_NGINX_VERSION := controller-v1.15.1
 IMAGES := api worker audit ui
 
+# --------------------------------------------------------------- F6: argo ---
+# Version del chart de Argo CD, fijada. Un agente de GitOps que se actualiza solo
+# puede cambiar como se sincroniza todo lo demas sin que nadie toque el repositorio.
+ARGOCD_CHART_VERSION := 9.1.7
+
 .DEFAULT_GOAL := help
 .PHONY: help demo up down restart ps logs topics urls clean nuke build test verify run-api run-worker run-audit run-ui estado \
-        kind-up kind-down kind-ingress kind-secret images kind-load deploy k8s k8s-status k8s-urls
+        kind-up kind-down kind-ingress kind-secret images kind-load deploy k8s k8s-status k8s-urls \
+        argocd-install argocd-bootstrap argocd-password argocd-ui argocd-status
 
 help: ## Lista los objetivos disponibles
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -153,6 +159,43 @@ k8s-urls: ## Dónde entrar una vez desplegado
 
 kind-down: ## Borra el cluster de kind entero
 	kind delete cluster --name $(KIND_CLUSTER)
+
+# ------------------------------------------------------------- F6: Argo CD ---
+# Estos objetivos usan el contexto de kubectl ACTIVO, no el de kind, porque valen
+# igual para el nodo de k3s del demo publico. Comprueba con `kubectl config
+# current-context` antes de lanzarlos.
+
+# El unico `helm install` contra el cluster que ejecuta este proyecto. Alguien
+# tiene que meter dentro al primer agente de GitOps; a partir de aqui, todo lo
+# demas lo despliega el.
+argocd-install: ## Instala Argo CD en el cluster activo
+	helm repo add argo https://argoproj.github.io/argo-helm
+	helm repo update argo
+	helm upgrade --install argocd argo/argo-cd \
+		--version $(ARGOCD_CHART_VERSION) \
+		--namespace argocd --create-namespace \
+		-f k8s/argocd/install/values.yaml \
+		--wait --timeout 10m
+
+# El unico `kubectl apply` que este proyecto ejecuta contra el cluster. Despues
+# de esto, Argo descubre solo todo lo que haya en k8s/argocd/applications/.
+argocd-bootstrap: ## Aplica el proyecto y la aplicacion raiz; a partir de aqui manda git
+	kubectl apply -f k8s/argocd/project.yaml
+	kubectl apply -f k8s/argocd/root.yaml
+
+argocd-password: ## Contrasena inicial del administrador
+	@kubectl -n argocd get secret argocd-initial-admin-secret \
+		-o jsonpath='{.data.password}' | base64 -d; echo ""
+
+# Sin Ingress a proposito: quien controla Argo CD controla todo lo que se
+# despliega. Se llega por un tunel local, no por internet.
+argocd-ui: ## Abre la interfaz en https://localhost:8081 (usuario admin)
+	@echo "  http://localhost:8081   usuario admin, contrasena: make argocd-password"
+	kubectl -n argocd port-forward svc/argocd-server 8081:80
+
+argocd-status: ## Estado de sincronizacion de todas las aplicaciones
+	@kubectl -n argocd get applications.argoproj.io \
+		-o custom-columns=NOMBRE:.metadata.name,SYNC:.status.sync.status,SALUD:.status.health.status
 
 clean: ## Apaga y borra los volúmenes: brokers vacíos, estado perdido
 	$(COMPOSE) down -v

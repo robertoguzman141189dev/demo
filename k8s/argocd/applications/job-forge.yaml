@@ -1,0 +1,57 @@
+# El demo.
+#
+# A diferencia de platform, esta sí tiene prune: aquí todo es efímero y no hay
+# ningún volumen que perder. Si un Deployment desaparece del repositorio, debe
+# desaparecer del cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: job-forge
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: event-lab
+
+  sources:
+    - repoURL: https://github.com/robertoguzman141189dev/demo.git
+      targetRevision: main
+      path: k8s/charts/job-forge
+      helm:
+        valueFiles:
+          - $values/k8s/overlays/prod/job-forge/values.yaml
+    - repoURL: https://github.com/robertoguzman141189dev/demo.git
+      targetRevision: main
+      ref: values
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: job-forge
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # Borra en orden inverso a las dependencias y espera a que termine, en vez
+      # de lanzar los borrados en paralelo. Con consumidores que necesitan cerrar
+      # ordenadamente, importa.
+      - PrunePropagationPolicy=foreground
+      # Evita que Argo dé por sincronizada una aplicación cuyos pods aún no han
+      # arrancado. Sin esto, un despliegue roto aparece en verde.
+      - ApplyOutOfSyncOnly=false
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
+  # NOTA sobre el primer despliegue: mientras image.registry e image.tag estén
+  # vacíos en el values de producción, esta Application FALLARÁ al renderizar con
+  # el mensaje del chart. Es el comportamiento correcto y está diseñado así
+  # (ADR 002): un despliegue que no sabe qué versión desplegar no debe adivinar.
+  # La primera ejecución del pipeline rellena el tag y la aplicación se pone
+  # verde sola.
