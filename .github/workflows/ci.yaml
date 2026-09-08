@@ -1,0 +1,165 @@
+# Integración y publicación.
+#
+# El pipeline NUNCA toca el cluster. Su única escritura es un commit que cambia
+# el tag de imagen en k8s/overlays/prod/, y a partir de ahí manda Argo CD.
+#
+# Y no guarda ningún secreto de AWS. La identidad viaja en un token OIDC que
+# GitHub firma en cada ejecución y que AWS acepta porque conoce sus claves
+# públicas; a cambio entrega credenciales que caducan al terminar el job.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      # Sin esto, el pipeline entra en bucle: publica, escribe el tag, ese commit
+      # dispara el pipeline, que publica otra vez. Es la primera trampa de
+      # cualquier CI que se commitea a sí mismo.
+      - "k8s/overlays/**"
+      - "docs/**"
+      - "**.md"
+  pull_request:
+    branches: [main]
+
+# Un commit nuevo cancela la ejecución anterior de la misma rama. Evita publicar
+# una imagen de un commit que ya quedó atrás.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Permisos mínimos por defecto; cada job amplía lo que necesita. GitHub da
+# permisos amplios si no se declara nada, y esa es la configuración que hay que
+# evitar.
+permissions:
+  contents: read
+
+# Nota sobre los runners: los jobs que construyen usan ubuntu-24.04-arm.
+#
+# Todas las imágenes son ARM, porque tanto el nodo del demo como los de EKS son
+# Graviton. Construir en un runner x86 obligaría a emular con QEMU, y para un
+# build de Maven eso multiplica el tiempo por diez. Los runners ARM de GitHub son
+# gratuitos en repositorios públicos, así que no cuesta nada hacerlo bien.
+jobs:
+  test:
+    name: Pruebas
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # verify y no test: las pruebas de integración corren con failsafe y
+      # levantan Testcontainers de verdad contra RabbitMQ y Kafka. Es lo que hace
+      # que un fallo de topología o de reentrega se detecte aquí y no en el
+      # cluster.
+      - name: Compilar y probar
+        run: mvn -B -ntp -f apps/job-forge/pom.xml verify
+
+  images:
+    name: Imágenes
+    needs: test
+    # Solo se publica desde main. Un pull request compila y prueba, pero no
+    # escribe nada en ECR.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04-arm
+
+    permissions:
+      # El permiso que habilita OIDC. Sin él, GitHub no emite el token y la
+      # autenticación contra AWS falla con un mensaje que no menciona OIDC.
+      id-token: write
+      contents: read
+
+    outputs:
+      registry: ${{ steps.ecr.outputs.registry }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Asumir el rol de AWS
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          # Un ARN no es un secreto: sin el token OIDC de este repositorio no
+          # sirve de nada. Por eso va como variable y no como secreto.
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: ci-${{ github.run_id }}
+
+      - name: Entrar en ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Construir y publicar
+        run: |
+          set -euo pipefail
+          REGISTRY="${{ steps.ecr.outputs.registry }}"
+          # El SHA completo del commit, no el corto: es irrepetible por
+          # construcción y lleva del contenedor al código exacto. Nunca :latest.
+          TAG="${GITHUB_SHA}"
+
+          for MODULE in api worker audit; do
+            docker buildx build \
+              --build-arg "MODULE=${MODULE}" \
+              --tag "${REGISTRY}/event-lab/job-forge-${MODULE}:${TAG}" \
+              --platform linux/arm64 \
+              --push \
+              apps/job-forge
+          done
+
+          docker buildx build \
+            --tag "${REGISTRY}/event-lab/job-forge-ui:${TAG}" \
+            --platform linux/arm64 \
+            --push \
+            apps/job-forge/ui
+
+  desplegar:
+    name: Escribir el tag
+    needs: images
+    runs-on: ubuntu-latest
+
+    permissions:
+      # El único permiso de escritura de todo el pipeline, y solo sobre el
+      # repositorio. Este workflow no tiene ni puede tener credenciales del
+      # cluster: quien despliega es Argo CD.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Actualizar el values de producción
+        env:
+          REGISTRY: ${{ needs.images.outputs.registry }}
+        run: |
+          set -euo pipefail
+          VALUES=k8s/overlays/prod/job-forge/values.yaml
+
+          # yq y no sed: editar YAML con expresiones regulares funciona hasta el
+          # día que alguien reordena el archivo.
+          yq -i ".image.registry = \"${REGISTRY}/\"" "$VALUES"
+          for SVC in api worker audit ui; do
+            yq -i ".${SVC}.image.tag = \"${GITHUB_SHA}\"" "$VALUES"
+          done
+
+          git diff --stat
+
+      - name: Commitear
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet; then
+            echo "El tag ya estaba puesto: no hay nada que commitear."
+            exit 0
+          fi
+
+          git add k8s/overlays/prod/job-forge/values.yaml
+          # [skip ci] es el segundo cinturón: paths-ignore ya evita el bucle, pero
+          # si alguien toca ese filtro sin darse cuenta, esto lo sigue frenando.
+          git commit -m "chore(deploy): job-forge a ${GITHUB_SHA} [skip ci]"
+          git push

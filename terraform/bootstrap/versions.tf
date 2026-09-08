@@ -13,6 +13,12 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    # Solo para calcular la huella del certificado de GitHub, en vez de dejar un
+    # valor copiado a mano que caduca sin avisar.
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 }
 

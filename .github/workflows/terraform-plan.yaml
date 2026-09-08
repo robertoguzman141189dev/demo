@@ -1,0 +1,110 @@
+# Plan de Terraform en los pull request.
+#
+# Plan y NUNCA apply. Aplicar infraestructura desde un pull request significa que
+# cualquiera que abra una rama puede crear recursos que facturan. El apply se
+# ejecuta a mano, mirando el plan, por alguien que asume el coste.
+#
+# El rol que asume este workflow es de SOLO LECTURA y confía en un `sub` distinto
+# al del pipeline de publicación: pull_request en vez de la rama main. Un pull
+# request no puede tocar ECR ni aunque el YAML se lo pida.
+name: terraform-plan
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-plan.yaml"
+
+concurrency:
+  group: tf-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+      # Para dejar el plan como comentario en el pull request, que es donde se
+      # revisa. Un plan que hay que ir a buscar a los logs no lo mira nadie.
+      pull-requests: write
+
+    strategy:
+      # Sin fail-fast: si el plan del demo falla, sigue interesando ver el del
+      # laboratorio.
+      fail-fast: false
+      matrix:
+        module: [bootstrap, aws-ec2-k3s, aws-eks]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Asumir el rol de solo lectura
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: plan-${{ github.run_id }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.1"
+          # Sin envoltorio: interfiere con la captura de la salida del plan.
+          terraform_wrapper: false
+
+      - name: Formato
+        run: terraform -chdir=terraform fmt -check -recursive
+
+      - name: Init
+        # bootstrap guarda su estado en local a propósito —es quien crea el
+        # bucket—, así que no lleva backend que configurar.
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.module }}" = "bootstrap" ]; then
+            terraform -chdir=terraform/bootstrap init -input=false
+          else
+            terraform -chdir=terraform/${{ matrix.module }} init -input=false \
+              -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          fi
+
+      - name: Validate
+        run: terraform -chdir=terraform/${{ matrix.module }} validate
+
+      - name: Plan
+        id: plan
+        # -lock=false porque esto no va a aplicar nada: no tiene sentido bloquear
+        # el estado y arriesgarse a dejarlo trabado si el job se cancela.
+        run: |
+          set -euo pipefail
+          # alert_email solo lo declara bootstrap. Pasar un -var que el módulo no
+          # declara no es un aviso: Terraform falla con "Value for undeclared
+          # variable" y el plan no llega a ejecutarse.
+          EXTRA=""
+          if [ "${{ matrix.module }}" = "bootstrap" ]; then
+            EXTRA="-var=alert_email=${{ vars.BUDGET_ALERT_EMAIL }}"
+          fi
+
+          terraform -chdir=terraform/${{ matrix.module }} plan \
+            -input=false -lock=false -no-color $EXTRA \
+            > plan.txt 2>&1 || true
+          tail -c 60000 plan.txt > plan-recortado.txt
+        continue-on-error: true
+
+      - name: Comentar el plan en el pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('plan-recortado.txt', 'utf8');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Plan de \`${{ matrix.module }}\`\n\n<details><summary>Ver el plan</summary>\n\n\`\`\`terraform\n${plan}\n\`\`\`\n\n</details>`
+            });
