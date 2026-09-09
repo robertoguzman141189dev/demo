@@ -34,7 +34,7 @@ api:
     repository: event-lab/job-forge-api
     # Vacío: lo escribe el pipeline con el SHA del commit. Un despliegue sin tag
     # falla al renderizar en vez de desplegar algo arbitrario.
-    tag: "6d045c1361a73787de0cee0c23b090aa1d68cd2e"
+    tag: "db470634ed5c45e80760eae180e487ee5ce7adb8"
   resources:
     requests:
       cpu: 100m
@@ -56,7 +56,7 @@ worker:
   replicas: 1
   image:
     repository: event-lab/job-forge-worker
-    tag: "6d045c1361a73787de0cee0c23b090aa1d68cd2e"
+    tag: "db470634ed5c45e80760eae180e487ee5ce7adb8"
   resources:
     requests:
       cpu: 100m
@@ -68,7 +68,7 @@ audit:
   replicas: 1
   image:
     repository: event-lab/job-forge-audit
-    tag: "6d045c1361a73787de0cee0c23b090aa1d68cd2e"
+    tag: "db470634ed5c45e80760eae180e487ee5ce7adb8"
   resources:
     requests:
       cpu: 100m
@@ -80,4 +80,4 @@ ui:
   replicas: 1
   image:
     repository: event-lab/job-forge-ui
-    tag: "6d045c1361a73787de0cee0c23b090aa1d68cd2e"
+    tag: "db470634ed5c45e80760eae180e487ee5ce7adb8"
