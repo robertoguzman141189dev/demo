@@ -38,13 +38,60 @@ Es la línea que decide si esto es una defensa o un agujero:
 
 ```
 token.actions.githubusercontent.com:sub
-  = repo:robertoguzman141189dev/demo:ref:refs/heads/main
+  = repo:robertoguzman141189dev@267489505/demo@1361658022:ref:refs/heads/main
 ```
 
 Solo las ejecuciones sobre `main` de ese repositorio. Un comodín amplio
 —`repo:mi-org/*` o, peor, `repo:*`— permite que **el workflow de cualquiera**
 asuma el rol. No produce ningún error: simplemente funciona de más. Es un fallo
 conocido y explotado.
+
+#### El formato del `sub` no es el que dice la documentación
+
+El primer intento falló, y la forma de fallar merece quedar escrita porque se
+repetirá.
+
+Prácticamente todas las guías dicen que el subject es
+`repo:owner/repo:ref:refs/heads/main`. Con esa condición, el pipeline murió con:
+
+```
+Could not assume role with OIDC:
+Not authorized to perform sts:AssumeRoleWithWebIdentity
+```
+
+Un mensaje que **no dice qué no encajaba**. La política era correcta línea por
+línea, el proveedor estaba registrado y la variable llegaba bien.
+
+Se resolvió preguntándole a AWS por el otro lado: **CloudTrail registra los
+intentos fallidos junto con el subject que se presentó**.
+
+```sh
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity \
+  --query 'Events[].[EventTime,Username]' --output text
+```
+
+Y ahí estaba lo que GitHub manda de verdad:
+
+```
+repo:robertoguzman141189dev@267489505/demo@1361658022:ref:refs/heads/main
+```
+
+GitHub intercala **identificadores numéricos inmutables** junto al nombre de la
+cuenta y del repositorio. Y lo hace por una buena razón: los números no cambian
+al renombrar, así que quien registre el nombre que tú abandonaste **no hereda tu
+confianza**. Es más seguro que el formato antiguo y rompe todas las guías
+escritas antes.
+
+Los dos identificadores se obtienen así, y se verificaron antes de fijarlos:
+
+```sh
+curl -s https://api.github.com/repos/OWNER/REPO | jq '.id, .owner.id'
+```
+
+La lección que vale más que el dato concreto: **cuando una autenticación
+federada falla, el emisor no te dice por qué, pero el receptor sí.** CloudTrail
+es el sitio donde mirar.
 
 ### 3. Dos roles, no uno
 
@@ -82,7 +129,12 @@ lo pida, porque no tiene con qué.
 - **Un `sub` mal escrito falla de forma opaca.** El pod o el job recibe un
   `AccessDenied` que no dice qué condición no casó. El error más común en IRSA es
   dejar el `https://` en el emisor dentro de la condición: nunca casa, y nada lo
-  explica. Por eso el módulo expone el emisor ya recortado.
+  explica. Por eso el módulo expone el emisor ya recortado. Ya nos costó una
+  ejecución fallida del pipeline por el formato del subject; está arriba.
+- **Fijar los identificadores numéricos ata la confianza a un repositorio
+  concreto para siempre**, que es lo que se quiere, pero significa que mover el
+  proyecto a otra cuenta u otro repositorio exige tocar Terraform y aplicar. No
+  basta con renombrar.
 - **La confianza está atada a una rama concreta.** Publicar desde otra rama exige
   tocar Terraform y aplicar. Es fricción deliberada, pero es fricción.
 - **`ReadOnlyAccess` en el rol del plan es más de lo estrictamente necesario.** Un
@@ -130,6 +182,12 @@ lo pida, porque no tiene con qué.
   secretos que imprime `terraform output`.
 - `.github/workflows/ci.yaml` construye en runners ARM porque todos los nodos son
   Graviton; emular con QEMU haría el build inviable.
+- **Verificado punta a punta el 2026-09-09**, no solo escrito. Un push a `main`
+  ejecutó las pruebas con Testcontainers sobre un runner ARM, asumió el rol por
+  OIDC sin ningún secreto guardado, publicó las cuatro imágenes en ECR con el SHA
+  completo del commit y escribió el tag de vuelta en
+  `k8s/overlays/prod/job-forge/values.yaml`. El `[skip ci]` de ese commit evitó
+  que se disparase a sí mismo.
 - **Queda un hueco declarado:** el `Secret` con las credenciales de RabbitMQ se
   sigue creando a mano. El `CLAUDE.md` pide External Secrets contra Secrets
   Manager, que es el segundo consumidor natural de IRSA. No entra en esta entrega

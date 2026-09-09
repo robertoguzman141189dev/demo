@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "job-forge — la entrega es el producto",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "camino-feliz",
+        "label": "Camino feliz",
+        "focus": ["panel", "api", "exchange", "work", "worker"],
+        "note": "Una tarea que sale bien: del panel a la cola de trabajo y de ahi a un worker."
+      },
+      {
+        "id": "cuando-falla",
+        "label": "Cuando falla",
+        "focus": ["worker", "retry", "exchange", "work", "dead"],
+        "note": "Backoff escalonado con TTL y dead-letter, sin scheduler externo ni base de datos."
+      },
+      {
+        "id": "auditoria",
+        "label": "El log es la verdad",
+        "focus": ["worker", "eventos", "audit", "estado"],
+        "note": "Kafka como log de auditoria; el estado se deriva y se reconstruye al arrancar."
+      }
+    ]
+  },
+  "components": [
+    { "id": "panel", "type": "frontend", "label": "Panel", "sublabel": "Angular + WebSocket", "pos": [40, 300], "size": [130, 60] },
+    { "id": "api", "type": "backend", "label": "API", "sublabel": "Spring Boot", "pos": [240, 300], "size": [130, 60] },
+    { "id": "exchange", "type": "messagebus", "label": "jobs", "sublabel": "exchange direct", "pos": [440, 300], "size": [140, 60], "tag": "RabbitMQ" },
+    { "id": "work", "type": "messagebus", "label": "jobs.work", "sublabel": "cola quorum", "pos": [650, 300], "size": [140, 60] },
+    { "id": "worker", "type": "backend", "label": "Worker", "sublabel": "prefetch 1", "pos": [890, 300], "size": [130, 60] },
+    { "id": "dead", "type": "messagebus", "label": "jobs.dead", "sublabel": "cola de muertos", "pos": [645, 120], "size": [150, 64] },
+    { "id": "eventos", "type": "messagebus", "label": "trabajos.eventos", "sublabel": "log append-only", "pos": [890, 120], "size": [160, 60], "tag": "Kafka" },
+    { "id": "audit", "type": "backend", "label": "Proyector", "sublabel": "deriva el estado", "pos": [1150, 120], "size": [140, 60] },
+    { "id": "estado", "type": "database", "label": "trabajos.estado", "sublabel": "topic compactado", "pos": [1150, 300], "size": [160, 60] },
+    { "id": "retry", "type": "messagebus", "label": "Colas de espera", "sublabel": "5s · 30s · 2m", "pos": [430, 490], "size": [200, 64], "tag": "TTL + DLX" }
+  ],
+  "connections": [
+    { "id": "panel-api", "from": "panel", "to": "api", "label": "sube archivo", "variant": "emphasis" },
+    { "id": "api-exchange", "from": "api", "to": "exchange", "label": "publica tarea", "variant": "emphasis" },
+    { "id": "exchange-work", "from": "exchange", "to": "work", "variant": "emphasis" },
+    { "id": "work-worker", "from": "work", "to": "worker", "label": "acuse manual", "variant": "emphasis" },
+    { "id": "worker-retry", "from": "worker", "to": "retry", "label": "falla: republica al tramo", "fromSide": "bottom", "toSide": "right" },
+    { "id": "retry-exchange", "from": "retry", "to": "exchange", "label": "vence el TTL, el DLX devuelve", "fromSide": "top", "toSide": "bottom" },
+    { "id": "work-dead", "from": "work", "to": "dead", "label": "agota x-delivery-limit", "fromSide": "top", "toSide": "bottom" },
+    { "id": "worker-eventos", "from": "worker", "to": "eventos", "label": "publica el evento", "fromSide": "top", "toSide": "bottom" },
+    { "id": "eventos-audit", "from": "eventos", "to": "audit" },
+    { "id": "audit-estado", "from": "audit", "to": "estado", "label": "clave: taskId", "fromSide": "bottom", "toSide": "top" },
+    { "id": "estado-worker", "from": "estado", "to": "worker", "label": "reconstruye al arrancar", "variant": "dashed", "fromSide": "left", "toSide": "right", "labelDy": 44 }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Entrega resiliente",
+      "items": [
+        "Acuse manual por unidad de trabajo, con prefetch 1",
+        "El worker publica, espera el confirm y solo entonces acusa",
+        "Idempotencia obligatoria: at-least-once es la semantica por defecto"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Backoff sin scheduler",
+      "items": [
+        "Tres colas de espera con TTL propio y DLX de vuelta al exchange",
+        "El worker republica al tramo que toca: el dead-lettering no deja elegir destino",
+        "El contador de intentos viaja en el header x-attempt, nunca en el cuerpo"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "El log es la verdad",
+      "items": [
+        "trabajos.eventos guarda la historia; trabajos.estado es una conclusion derivada",
+        "El worker reconstruye desde el compactado antes de consumir nada",
+        "La cola de muertos se inspecciona y se reprocesa desde el panel"
+      ]
+    }
+  ]
+}

@@ -35,6 +35,15 @@ externo, sin base de datos, sin un solo `Thread.sleep`.
 Kafka aparece aquí, pero en su papel correcto: log de auditoría inmutable y un
 topic compactado desde el que se reconstruye el estado sin persistencia propia.
 
+![Topología de mensajería de job-forge](docs/diagramas/job-forge-topologia.png)
+
+El camino principal va en verde. Debajo, las tres colas de espera que producen el
+backoff escalonado; arriba, la cola de muertos cuando se agotan las entregas; a la
+derecha, el log de auditoría del que el worker reconstruye su estado al arrancar.
+La versión interactiva —con vistas guiadas y trazado de relaciones— está en
+[`docs/diagramas/job-forge-topologia.html`](docs/diagramas/job-forge-topologia.html);
+GitHub no renderiza HTML, así que hay que descargarlo y abrirlo.
+
 ## `stream-guard` — el estado vive dentro del consumidor
 
 Un flujo de transacciones sintéticas y tres detectores de fraude que deciden con
