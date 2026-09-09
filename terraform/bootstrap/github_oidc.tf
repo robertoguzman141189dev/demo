@@ -25,6 +25,50 @@ variable "github_repository" {
   }
 }
 
+# Los dos identificadores numéricos que GitHub mete en el subject del token.
+#
+# Se obtienen así:
+#   curl -s https://api.github.com/repos/OWNER/REPO | jq '.id, .owner.id'
+variable "github_owner_id" {
+  description = "Identificador numérico de la cuenta de GitHub."
+  type        = string
+  default     = "267489505"
+}
+
+variable "github_repository_id" {
+  description = "Identificador numérico del repositorio."
+  type        = string
+  default     = "1361658022"
+}
+
+locals {
+  github_owner = split("/", var.github_repository)[0]
+  github_repo  = split("/", var.github_repository)[1]
+
+  # EL FORMATO DEL SUBJECT, que no es el que sale en casi toda la documentación.
+  #
+  # Prácticamente todos los tutoriales dicen que el sub es:
+  #
+  #     repo:owner/repo:ref:refs/heads/main
+  #
+  # Y con esa condición el primer intento falló con un escueto "Not authorized to
+  # perform sts:AssumeRoleWithWebIdentity", sin decir qué no casaba. CloudTrail
+  # reveló lo que GitHub manda de verdad:
+  #
+  #     repo:owner@267489505/repo@1361658022:ref:refs/heads/main
+  #
+  # GitHub intercala identificadores numéricos inmutables junto al nombre de la
+  # cuenta y del repositorio. Son inmutables a propósito: si mañana renombras el
+  # repositorio o la cuenta, los números no cambian, y un atacante que registre
+  # el nombre que tú abandonaste no hereda tu confianza. Es más seguro que el
+  # formato antiguo, pero rompe todas las guías escritas antes.
+  #
+  # Se fijan los dos: los nombres Y los identificadores. Pinchar solo los nombres
+  # es lo que este cambio viene a arreglar; pinchar solo los números funcionaría
+  # igual y sería más resistente a renombrados, pero deja el manifiesto ilegible.
+  github_sub_prefix = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}"
+}
+
 data "tls_certificate" "github" {
   url = "https://token.actions.githubusercontent.com/.well-known/openid-configuration"
 }
@@ -59,8 +103,8 @@ data "aws_iam_policy_document" "github_push_assume" {
 
     # ESTA es la condición que importa, y donde se cometen los errores caros.
     #
-    # El sub codifica repositorio, tipo de referencia y rama. Fijado así, solo las
-    # ejecuciones sobre main de ESTE repositorio pueden asumir el rol.
+    # El sub codifica repositorio, identificadores inmutables y rama. Fijado así,
+    # solo las ejecuciones sobre main de ESTE repositorio pueden asumir el rol.
     #
     # Dejarlo con un comodín amplio —"repo:mi-org/*" o, peor, "repo:*"— permite
     # que el workflow de cualquiera asuma tu rol. No da ningún error: simplemente
@@ -69,7 +113,7 @@ data "aws_iam_policy_document" "github_push_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+      values   = ["${local.github_sub_prefix}:ref:refs/heads/main"]
     }
   }
 }
@@ -140,11 +184,12 @@ data "aws_iam_policy_document" "github_plan_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # Solo pull request de este repositorio, no ramas arbitrarias.
+    # Solo pull request de este repositorio, no ramas arbitrarias. Mismo formato
+    # con identificadores inmutables que el rol de publicación.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:pull_request"]
+      values   = ["${local.github_sub_prefix}:pull_request"]
     }
   }
 }
