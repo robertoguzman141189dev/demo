@@ -60,6 +60,18 @@ spec:
           config:
             proxy-read-timeout: "3600"
             proxy-send-timeout: "3600"
+            # 429 y no el 503 que nginx devuelve por defecto al rechazar por
+            # rate limiting. Un 503 dice "el servicio no esta disponible", que es
+            # falso y manda al cliente a reintentar sin criterio; 429 dice "has
+            # pedido demasiado", que es la verdad, y asi coincide con lo que
+            # responde el tope global del API.
+            #
+            # OJO: esto va aqui, en el ConfigMap del controlador, y NO como
+            # anotacion del Ingress. Es un ajuste global, no por Ingress, y
+            # puesto como anotacion se ignora EN SILENCIO. Costo una prueba
+            # descubrirlo: el limite frenaba correctamente pero devolvia 503.
+            limit-req-status-code: "429"
+            limit-conn-status-code: "429"
           # Sin metricas todavia: las enciende F7, junto con los dashboards.
           metrics:
             enabled: false

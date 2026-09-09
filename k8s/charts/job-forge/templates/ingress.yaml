@@ -33,7 +33,6 @@ metadata:
     nginx.ingress.kubernetes.io/limit-rps: {{ .Values.ingress.limits.panelRequestsPerSecond | quote }}
     nginx.ingress.kubernetes.io/limit-burst-multiplier: {{ .Values.ingress.limits.panelBurstMultiplier | quote }}
     nginx.ingress.kubernetes.io/limit-connections: {{ .Values.ingress.limits.panelConnections | quote }}
-    nginx.ingress.kubernetes.io/limit-req-status-code: {{ .Values.ingress.limits.statusCode | quote }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -77,7 +76,6 @@ metadata:
     nginx.ingress.kubernetes.io/limit-rps: {{ .Values.ingress.limits.apiRequestsPerSecond | quote }}
     nginx.ingress.kubernetes.io/limit-burst-multiplier: {{ .Values.ingress.limits.apiBurstMultiplier | quote }}
     nginx.ingress.kubernetes.io/limit-connections: {{ .Values.ingress.limits.apiConnections | quote }}
-    nginx.ingress.kubernetes.io/limit-req-status-code: {{ .Values.ingress.limits.statusCode | quote }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
