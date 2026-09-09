@@ -62,6 +62,53 @@
   }
 </section>
 
+<section class="journey">
+  <h2>El viaje de una tarea</h2>
+  <p class="hint">
+    Aquí está la tesis del demo. El feed de abajo dice que hubo reintentos; esto
+    dice <strong>cuánto se esperó entre uno y otro</strong>, y ahí se ve el
+    escalonado: primero 5 segundos, luego 30, luego 2 minutos. Sin scheduler y sin
+    base de datos: solo colas con TTL.
+  </p>
+
+  @if (journey(); as viaje) {
+    <div class="journey-head">
+      <span class="mono task">{{ viaje.taskId.slice(0, 8) }}</span>
+      <span class="outcome" [attr.data-outcome]="viaje.outcome">{{ viaje.outcome }}</span>
+      <span class="total">{{ formatWait(viaje.totalMs) }} de principio a fin</span>
+      @if (pinnedTask()) {
+        <button type="button" class="unpin" (click)="pin(viaje.taskId)">
+          soltar y seguir la última
+        </button>
+      } @else {
+        <span class="following">siguiendo la última — pulsa una tarea del feed para fijarla</span>
+      }
+    </div>
+
+    <ol class="steps">
+      @for (step of viaje.steps; track $index) {
+        @if (step.waitedMs !== null) {
+          <li class="wait" [class.long]="step.waitedMs >= 4000">
+            esperó {{ formatWait(step.waitedMs) }}
+          </li>
+        }
+        <li class="step" [attr.data-type]="step.event.type">
+          <span class="when mono">{{ formatTime(step.event.occurredAt) }}</span>
+          <span class="what">{{ label(step.event.type) }}</span>
+          <span class="attempt">intento {{ step.event.attempt }}</span>
+          <span class="detail">{{ step.event.detail }}</span>
+        </li>
+      }
+    </ol>
+  } @else {
+    <p class="empty">
+      Nada todavía. Sube la tasa de fallo al 40 % y genera unas tareas: las que
+      fallen recorrerán los tres tramos y aquí se verá el tiempo que pasan en cada
+      uno.
+    </p>
+  }
+</section>
+
 <section class="dead">
   <h2>Cola muerta</h2>
   <p class="hint">
@@ -99,15 +146,24 @@
   <p class="hint">
     Esto no observa a los workers: lee el log de auditoría que los workers
     escriben. Por eso enseña lo mismo haya una réplica o veinte.
+    <strong>Pulsa cualquier línea</strong> para ver el viaje completo de esa tarea
+    arriba.
   </p>
 
   @for (event of panel.events(); track $index) {
-    <div class="event" [attr.data-type]="event.type">
-      <span class="type">{{ event.type }}</span>
+    <button
+      type="button"
+      class="event"
+      [attr.data-type]="event.type"
+      [class.pinned]="pinnedTask() === event.taskId"
+      (click)="pin(event.taskId)"
+      [title]="'Ver el viaje completo de ' + event.taskId"
+    >
+      <span class="type">{{ label(event.type) }}</span>
       <span class="mono">{{ event.taskId.slice(0, 8) }}</span>
       <span class="attempt">intento {{ event.attempt }}</span>
       <span class="detail">{{ event.detail }}</span>
-    </div>
+    </button>
   } @empty {
     <p class="empty">Sin actividad. Genera algunas tareas.</p>
   }

@@ -67,6 +67,100 @@ td { padding: 0.35rem 0; border-bottom: 1px solid #f3f4f6; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .empty { color: #9ca3af; font-size: 0.88rem; }
 
+/* --------------------------------------------------- el viaje de una tarea --
+   La espera entre pasos es el dato importante, así que se pinta como un tramo
+   con altura propia en vez de como texto pequeño: cuanto más se esperó, más
+   ocupa. Es la única parte del panel donde el espacio en blanco significa algo. */
+
+.journey-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 0.85rem;
+}
+.journey-head .task { font-size: 0.95rem; font-weight: 600; }
+.journey-head .total, .journey-head .following { color: #6b7280; }
+.journey-head .following { font-size: 0.8rem; }
+
+.outcome {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+.outcome[data-outcome="completada"] { background: #dcfce7; color: #166534; }
+.outcome[data-outcome="muerta"] { background: #fee2e2; color: #b91c1c; }
+.outcome[data-outcome="pendiente"] { background: #fef3c7; color: #b45309; }
+
+.unpin {
+  margin-left: auto;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.55rem;
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  color: #4b5563;
+  cursor: pointer;
+}
+.unpin:hover { border-color: #9ca3af; color: #1c1f24; }
+
+.steps { list-style: none; margin: 1rem 0 0; padding: 0 0 0 1.1rem; border-left: 2px solid #e5e7eb; }
+
+.steps .step {
+  display: grid;
+  grid-template-columns: 5.5rem 11rem 5.5rem 1fr;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  font-size: 0.84rem;
+  position: relative;
+}
+/* El punto sobre el raíl. */
+.steps .step::before {
+  content: "";
+  position: absolute;
+  left: -1.45rem;
+  top: 0.72rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #9ca3af;
+}
+.steps .step[data-type="COMPLETED"]::before { background: #166534; }
+.steps .step[data-type="RETRY_SCHEDULED"]::before { background: #b45309; }
+.steps .step[data-type="DEAD_LETTERED"]::before { background: #b91c1c; }
+.steps .step .when { color: #9ca3af; font-size: 0.78rem; }
+.steps .step .what { font-weight: 600; }
+.steps .step[data-type="COMPLETED"] .what { color: #166534; }
+.steps .step[data-type="RETRY_SCHEDULED"] .what { color: #b45309; }
+.steps .step[data-type="DEAD_LETTERED"] .what { color: #b91c1c; }
+.steps .step .attempt, .steps .step .detail { color: #6b7280; }
+
+/* El tramo de espera. Aquí es donde se ve el escalonado. */
+.steps .wait {
+  position: relative;
+  margin-left: -1.1rem;
+  padding: 0.5rem 0 0.5rem 1.1rem;
+  font-size: 0.78rem;
+  color: #b45309;
+  font-variant-numeric: tabular-nums;
+}
+.steps .wait::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: repeating-linear-gradient(#b45309 0 4px, transparent 4px 8px);
+}
+/* Una espera larga ocupa más alto: el escalonado se ve antes de leer el número. */
+.steps .wait.long { padding-top: 1.4rem; padding-bottom: 1.4rem; }
+
 .event {
   display: grid;
   grid-template-columns: 11rem 5rem 6rem 1fr;
@@ -74,7 +168,18 @@ td { padding: 0.35rem 0; border-bottom: 1px solid #f3f4f6; }
   padding: 0.3rem 0;
   border-bottom: 1px solid #f3f4f6;
   font-size: 0.82rem;
+  /* Ahora es un botón: hay que deshacer lo que el navegador le pone. */
+  width: 100%;
+  text-align: left;
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  font-family: inherit;
+  cursor: pointer;
 }
+.event:hover { background: #f9fafb; }
+.event.pinned { background: #eff6ff; }
 .event .type { font-weight: 600; font-size: 0.72rem; letter-spacing: 0.04em; }
 .event[data-type="COMPLETED"] .type { color: #166534; }
 .event[data-type="RETRY_SCHEDULED"] .type { color: #b45309; }
