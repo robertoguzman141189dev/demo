@@ -11,18 +11,16 @@ image:
   # vacío, Argo CD marcará la Application como fallida al renderizar, que es el
   # comportamiento correcto: un despliegue sin saber de dónde sale la imagen no
   # debe adivinar.
-  registry: ""
+  registry: "686420703561.dkr.ecr.us-east-1.amazonaws.com/"
   # Always y no IfNotPresent: los tags son inmutables y llevan el SHA del commit,
   # así que descargar siempre no cuesta nada —la capa ya está en el nodo si no
   # cambió— y elimina la posibilidad de que un nodo se quede con una versión
   # antigua.
   pullPolicy: Always
-
 # Un solo nodo. topologySpreadConstraints no se puede satisfacer y dejaría los
 # pods en Pending; sobre EKS sí se enciende.
 topologySpread:
   enabled: false
-
 ingress:
   enabled: true
   className: nginx
@@ -30,14 +28,13 @@ ingress:
   # Sustituir por el dominio real cuando lo haya. Mientras tanto, la IP fija que
   # imprime terraform/aws-ec2-k3s resuelve igual con nip.io.
   host: job-forge.localtest.me
-
 api:
   replicas: 1
   image:
     repository: event-lab/job-forge-api
     # Vacío: lo escribe el pipeline con el SHA del commit. Un despliegue sin tag
     # falla al renderizar en vez de desplegar algo arbitrario.
-    tag: ""
+    tag: "6d045c1361a73787de0cee0c23b090aa1d68cd2e"
   resources:
     requests:
       cpu: 100m
@@ -45,7 +42,6 @@ api:
     limits:
       cpu: "1"
       memory: 384Mi
-
 worker:
   # UNO, no dos, y es la restricción que manda en todo este archivo.
   #
@@ -60,7 +56,7 @@ worker:
   replicas: 1
   image:
     repository: event-lab/job-forge-worker
-    tag: ""
+    tag: "6d045c1361a73787de0cee0c23b090aa1d68cd2e"
   resources:
     requests:
       cpu: 100m
@@ -68,12 +64,11 @@ worker:
     limits:
       cpu: "1"
       memory: 384Mi
-
 audit:
   replicas: 1
   image:
     repository: event-lab/job-forge-audit
-    tag: ""
+    tag: "6d045c1361a73787de0cee0c23b090aa1d68cd2e"
   resources:
     requests:
       cpu: 100m
@@ -81,9 +76,8 @@ audit:
     limits:
       cpu: 500m
       memory: 320Mi
-
 ui:
   replicas: 1
   image:
     repository: event-lab/job-forge-ui
-    tag: ""
+    tag: "6d045c1361a73787de0cee0c23b090aa1d68cd2e"
