@@ -31,9 +31,16 @@ ingress:
   enabled: true
   className: nginx
   namespace: ingress-nginx
-  # Sustituir por el dominio real cuando lo haya. Mientras tanto, la IP fija que
-  # imprime terraform/aws-ec2-k3s resuelve igual con nip.io.
-  host: job-forge.localtest.me
+  # El Ingress enruta por NOMBRE, no por IP. Entrar por http://<ip>/ devuelve 404
+  # aunque todo funcione detrás, porque ninguna regla casa con ese Host.
+  #
+  # nip.io resuelve cualquier nombre que contenga una IP a esa misma IP, así que
+  # esto da un nombre público real sin registrar dominio ni tocar DNS. La IP es la
+  # fija que imprime `terraform output public_ip`: si se recrea la instancia, la
+  # IP se conserva y esto sigue valiendo.
+  #
+  # El día que haya dominio propio, se cambia esta línea y nada más.
+  host: job-forge.184.194.37.219.nip.io
 api:
   replicas: 1
   image:
