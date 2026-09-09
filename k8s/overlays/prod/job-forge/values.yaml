@@ -17,6 +17,13 @@ image:
   # cambió— y elimina la posibilidad de que un nodo se quede con una versión
   # antigua.
   pullPolicy: Always
+
+# El demo público corre sobre k3s, que no sabe cambiar el rol del nodo por un
+# token de ECR. Un temporizador del propio nodo mantiene vivo este Secret,
+# renovándolo cada seis horas porque el token dura doce. No hay ninguna credencial
+# permanente en ningún sitio.
+imagePullSecrets:
+  - name: ecr-pull
 # Un solo nodo. topologySpreadConstraints no se puede satisfacer y dejaría los
 # pods en Pending; sobre EKS sí se enciende.
 topologySpread:

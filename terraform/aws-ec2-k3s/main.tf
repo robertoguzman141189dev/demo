@@ -106,6 +106,16 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Solo lectura sobre ECR: el nodo descarga imágenes, no las publica. Quien publica
+# es el pipeline, con su propio rol y su propia condición de confianza.
+#
+# Faltaba, y el síntoma fue un ErrImagePull con "no basic auth credentials" que no
+# menciona IAM por ningún lado.
+resource "aws_iam_role_policy_attachment" "ecr_read" {
+  role       = aws_iam_role.node.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
 resource "aws_iam_instance_profile" "node" {
   name = "event-lab-demo-node"
   role = aws_iam_role.node.name

@@ -13,6 +13,17 @@ image:
   registry: ""
   pullPolicy: IfNotPresent
 
+# Secretos para descargar de un registro privado. Vacío por defecto y a propósito.
+#
+# En kind no hacen falta: las imágenes se cargan directamente en el nodo. En EKS
+# tampoco: su kubelet trae un proveedor de credenciales que cambia el rol del nodo
+# por un token de ECR sin que nadie lo pida.
+#
+# Solo hace falta en el demo público, que corre sobre k3s y no tiene ese
+# mecanismo. Allí un temporizador del nodo mantiene vivo un Secret llamado
+# ecr-pull, y el values de producción lo referencia aquí.
+imagePullSecrets: []
+
 # Dónde están los brokers. El namespace platform es el único con el que los
 # namespaces de aplicación pueden hablar: lo impone templates/networkpolicy.yaml.
 platform:
