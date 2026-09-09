@@ -37,15 +37,18 @@ public class JobSubmissionService {
     private final MessageConverter converter;
     private final ApiProperties properties;
     private final JobEventPublisher events;
+    private final SubmissionBudget budget;
 
     public JobSubmissionService(ConfirmedPublisher publisher,
                                 MessageConverter converter,
                                 ApiProperties properties,
-                                JobEventPublisher events) {
+                                JobEventPublisher events,
+                                SubmissionBudget budget) {
         this.publisher = publisher;
         this.converter = converter;
         this.properties = properties;
         this.events = events;
+        this.budget = budget;
     }
 
     public JobAccepted submit(String content, JobPriority priority, int failProbability) {
@@ -57,6 +60,19 @@ public class JobSubmissionService {
             throw new InvalidSubmissionException(
                     "el archivo genera %d tareas y el máximo por subida es %d"
                             .formatted(fragments.size(), properties.getMaxTasksPerJob()));
+        }
+
+        // El tope global va aquí y no en el controlador, por dos motivos: cubre las
+        // dos vías de entrada —subida y generador sintético— con un solo control, y
+        // reserva el número EXACTO de tareas, porque a esta altura ya están
+        // contadas. Reservar en el controlador obligaría a duplicar la lógica de
+        // partido en líneas, y dos implementaciones del mismo recuento acaban
+        // divergiendo.
+        //
+        // Se reserva antes de publicar nada. Publicar y luego descubrir que no
+        // había presupuesto dejaría trabajo a medias en la cola.
+        if (budget.tryReserve(fragments.size()) == 0) {
+            throw new BudgetExhaustedException(fragments.size(), budget.retryAfter(fragments.size()));
         }
 
         String jobId = UUID.randomUUID().toString();

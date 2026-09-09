@@ -5,6 +5,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.stream.IntStream;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,10 +26,14 @@ public class JobController {
 
     private final JobSubmissionService submissions;
     private final DeadLetterService deadLetters;
+    private final SubmissionBudget budget;
 
-    public JobController(JobSubmissionService submissions, DeadLetterService deadLetters) {
+    public JobController(JobSubmissionService submissions,
+                         DeadLetterService deadLetters,
+                         SubmissionBudget budget) {
         this.submissions = submissions;
         this.deadLetters = deadLetters;
+        this.budget = budget;
     }
 
     /**
@@ -72,14 +78,40 @@ public class JobController {
         return deadLetters.peek(limit);
     }
 
+    /**
+     * Reprocesar también crea trabajo, así que también paga presupuesto. Sin esto,
+     * un bucle sobre este endpoint devuelve la cola muerta al circuito una y otra
+     * vez sin encontrarse ningún límite.
+     *
+     * <p>Se reserva por el límite pedido y no por lo efectivamente reprocesado,
+     * que se sabe después. Es conservador a propósito: un tope de seguridad debe
+     * equivocarse hacia el lado que protege.
+     */
     @PostMapping("/dead-letters/reprocess")
     public ReprocessResult reprocessDeadLetters(@RequestParam(defaultValue = "10") int limit) {
+        int solicitadas = Math.max(1, limit);
+        if (budget.tryReserve(solicitadas) == 0) {
+            throw new BudgetExhaustedException(solicitadas, budget.retryAfter(solicitadas));
+        }
         return new ReprocessResult(deadLetters.reprocess(limit));
     }
 
     @ExceptionHandler(InvalidSubmissionException.class)
     public ResponseEntity<ApiError> onInvalidSubmission(InvalidSubmissionException e) {
         return ResponseEntity.unprocessableEntity().body(new ApiError(e.getMessage()));
+    }
+
+    /**
+     * 429 y no 503: el problema no es que el servicio esté caído, es que quien
+     * llama ha pedido más de lo que se acepta por minuto. La distinción importa
+     * porque un 503 invita a reintentar sin más y un 429 con {@code Retry-After}
+     * dice exactamente cuándo.
+     */
+    @ExceptionHandler(BudgetExhaustedException.class)
+    public ResponseEntity<ApiError> onBudgetExhausted(BudgetExhaustedException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.retryAfter().toSeconds()))
+                .body(new ApiError(e.getMessage()));
     }
 
     public record ReprocessResult(int reprocessed) {

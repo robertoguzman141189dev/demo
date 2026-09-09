@@ -56,6 +56,24 @@ ingress:
   host: job-forge.localtest.me
   annotations: {}
 
+  # Rate limiting por IP. Es la primera de las dos capas que exige el §6 de
+  # CLAUDE.md; la segunda es el tope global por minuto del API.
+  #
+  # Estos números frenan a una persona insistiendo. NO frenan a cien IP
+  # distintas: para eso está SubmissionBudget, que cuenta sin mirar de dónde
+  # viene la petición.
+  limits:
+    # Holgado: una primera visita al panel descarga varios ficheros seguidos.
+    panelRequestsPerMinute: 300
+    panelConnections: 20
+    # Estricto: cada petición aquí publica mensajes en las colas. 60 por minuto
+    # es una por segundo, de sobra para jugar con el panel a mano.
+    apiRequestsPerMinute: 60
+    # Deja pasar una ráfaga corta —pulsar el botón dos veces no debe dar error—
+    # sin subir el ritmo sostenido.
+    apiBurstMultiplier: 3
+    apiConnections: 10
+
 # Reparto entre nodos. Se queda apagado en kind, que tiene un nodo solo: con un
 # único nodo la restricción no se puede satisfacer y los pods se quedarían en
 # Pending. Se enciende en el módulo de EKS.

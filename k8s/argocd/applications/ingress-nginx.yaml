@@ -33,6 +33,18 @@ spec:
           # costaria mas que la propia instancia.
           service:
             type: LoadBalancer
+            # ESTO decide si el rate limiting por IP funciona o es decorativo.
+            #
+            # Con la politica por defecto (Cluster), kube-proxy puede reescribir la
+            # IP de origen al reenviar entre nodos, y entonces nginx ve la IP del
+            # nodo en vez de la del visitante. El limite por IP pasaria a agrupar a
+            # TODO el mundo como un solo cliente: el primero que entre consume la
+            # cuota de los demas.
+            #
+            # Con Local, la IP del cliente se conserva. La contrapartida habitual
+            # —el trafico solo lo atiende el nodo donde hay un pod— aqui no existe:
+            # hay un nodo.
+            externalTrafficPolicy: Local
           # Una sola replica: es un nodo. Con dos, la segunda quedaria en Pending
           # por el antiafinidad y la Application nunca se pondria verde.
           replicaCount: 1

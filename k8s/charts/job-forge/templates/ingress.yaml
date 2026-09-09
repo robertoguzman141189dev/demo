@@ -1,12 +1,20 @@
 {{- if .Values.ingress.enabled }}
 {{/*
-El Ingress es el único punto de entrada, y también el sitio donde F7 pondrá el
-rate limiting: el panel es público y anónimo, y el endpoint no puede ser un
-vector de gasto.
+DOS Ingress y no uno, y el motivo es técnico: en ingress-nginx las anotaciones de
+rate limiting se aplican al Ingress COMPLETO, no a una ruta suelta. Con un solo
+objeto, el límite que protege a /api estrangularía también la carga de los
+ficheros estáticos del panel —una primera visita son varias peticiones seguidas de
+JS y CSS— y el panel tardaría en abrir o fallaría directamente.
 
-El reparto de rutas se hace aquí y no dentro de nginx del panel. Así hay un solo
-lugar donde se decide quién atiende qué, y ese lugar es el mismo donde se
-aplicarán los topes.
+Separados, cada uno lleva el límite que le corresponde:
+
+  job-forge      -> el panel y el WebSocket. Generoso; son ficheros y una
+                    conexión larga.
+  job-forge-api  -> los endpoints que CREAN TRABAJO. Estricto.
+
+El tope global por minuto, que es el que protege de muchas IP a la vez, no está
+aquí: vive en el API (ver SubmissionBudget). Estas anotaciones frenan a una
+persona insistiendo; aquello frena a cien repartidas.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -20,6 +28,9 @@ metadata:
     # parece parpadear sin motivo.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Holgado: una primera visita descarga varios ficheros de golpe.
+    nginx.ingress.kubernetes.io/limit-rpm: {{ .Values.ingress.limits.panelRequestsPerMinute | quote }}
+    nginx.ingress.kubernetes.io/limit-connections: {{ .Values.ingress.limits.panelConnections | quote }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -29,16 +40,9 @@ spec:
     - host: {{ .Values.ingress.host | quote }}
       http:
         paths:
-          # Las rutas más específicas primero. El controlador de nginx ordena por
-          # longitud, así que /api gana sobre / aunque el orden del YAML fuera
-          # otro; se escriben así de todas formas para que se lea la intención.
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "job-forge.fullname" . }}-api
-                port:
-                  name: http
+          # El WebSocket va al api, pero con los límites del panel: es una
+          # conexión larga, no una ráfaga de peticiones, y contarla como si
+          # creara trabajo cortaría el tiempo real.
           - path: /ws
             pathType: Prefix
             backend:
@@ -51,6 +55,38 @@ spec:
             backend:
               service:
                 name: {{ include "job-forge.fullname" . }}-ui
+                port:
+                  name: http
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "job-forge.fullname" . }}-api
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" "ingress") | nindent 4 }}
+  annotations:
+    # Aquí está el freno. Estos endpoints publican mensajes en las colas, así que
+    # cada petición cuesta trabajo real al cluster.
+    nginx.ingress.kubernetes.io/limit-rpm: {{ .Values.ingress.limits.apiRequestsPerMinute | quote }}
+    # Permite una ráfaga corta —pulsar el botón dos veces seguidas no debe dar un
+    # error— sin subir el ritmo sostenido.
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: {{ .Values.ingress.limits.apiBurstMultiplier | quote }}
+    nginx.ingress.kubernetes.io/limit-connections: {{ .Values.ingress.limits.apiConnections | quote }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "job-forge.fullname" . }}-api
                 port:
                   name: http
 {{- end }}
