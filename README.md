@@ -19,6 +19,13 @@ Son dos problemas distintos y **necesitan brokers distintos**. Este repositorio
 construye una demostración funcional de cada uno, con las palancas expuestas para
 que cualquiera pueda romper el sistema en vivo y ver cómo se recupera.
 
+**`job-forge` está encendido: → http://job-forge.184.194.37.219.nip.io**
+
+Sube un archivo o genera carga sintética, súbele la tasa de fallo y mira cómo el
+backoff escalonado recupera las tareas. Corre sobre k3s en una sola EC2, desplegado
+por Argo CD desde este repositorio. Los datos son sintéticos y se borran a los 30
+minutos.
+
 ---
 
 ## `job-forge` — la entrega es el producto

@@ -76,6 +76,23 @@ Detalles que se derivan de elegir un nodo:
   distinto, el balanceador es `klipper` en vez de un ELB, y no hay IRSA. Un
   manifiesto que funciona aquí puede no funcionar allí, y al revés. Se mitiga
   desplegando el mismo chart en los dos.
+
+  **Y esa diferencia ya costó un fallo concreto.** El kubelet de EKS trae un
+  proveedor de credenciales que cambia el rol del nodo por un token de ECR sin
+  que nadie se lo pida. k3s no lo trae, así que los cuatro pods se quedaron en
+  `ErrImagePull` con un `no basic auth credentials` que no menciona IAM por
+  ningún lado. Faltaban dos cosas: permiso de lectura de ECR en el rol de la
+  instancia, y un mecanismo que convirtiera ese rol en un token.
+
+  El binario del proveedor de credenciales de AWS no se publica como asset
+  descargable, así que se resolvió con un temporizador de `systemd` que renueva
+  el token como `Secret` cada seis horas —dura doce—. Aburrido a propósito: sin
+  credenciales permanentes, sin imágenes extra y sin dependencias nuevas. Es
+  exactamente el tipo de trabajo que EKS te ahorra y que conviene haber hecho una
+  vez para saber qué te está ahorrando.
+- **El Ingress enruta por nombre, no por IP.** Entrar por `http://<ip>/` devuelve
+  404 aunque todo funcione detrás. Se resuelve con `nip.io`, que da un nombre
+  público real sin registrar dominio. El día que haya dominio propio, es una línea.
 - **Dos entornos que mantener.** Cada cambio de infraestructura hay que pensarlo
   dos veces. Es el precio de separar el escaparate del laboratorio.
 - **La alerta de gasto avisa, no corta.** AWS Budgets manda un correo; no apaga

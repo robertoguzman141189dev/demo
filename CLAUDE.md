@@ -225,7 +225,7 @@ y `stream-guard` después, reutilizando toda la infraestructura.
 | F3 | Auditoría en Kafka y reconstrucción de estado desde el compactado | hecho |
 | F4 | Panel Angular con palancas y WebSocket | hecho |
 | F5 | Dockerfiles, Helm charts, despliegue en kind | hecho |
-| F6 | Terraform (EKS y EC2/k3s), Argo CD, GitHub Actions con OIDC | pendiente |
+| F6 | Terraform (EKS y EC2/k3s), Argo CD, GitHub Actions con OIDC | casi: falta aplicar EKS |
 | F7 | KEDA, dashboards de Grafana, blindaje del endpoint público | pendiente |
 | F8+ | `stream-guard`, mismas fases sobre la infra ya montada | pendiente |
 
@@ -258,6 +258,22 @@ Están documentadas en `docs/adr/`. Resumen:
   desplegando: sondas caras que se pelean con el arranque, un `startupProbe`
   corto que convierte un arranque lento en imposible, y que esperar a que un
   Deployment esté `Available` no es esperar a que sirva.
+- **ADR 008** — El demo público corre en k3s sobre una EC2 y EKS se alquila por
+  horas. Con precios consultados: 30 USD/mes frente a 155 con EKS de continuo,
+  sobre un presupuesto de 50. EKS no se tiene, se alquila.
+- **ADR 009** — Argo CD: qué se sincroniza solo y qué no. `prune` sí en las
+  aplicaciones y **no** en los brokers, porque un PVC borrado son datos perdidos.
+  Terraform crea AWS, Argo crea Kubernetes.
+- **ADR 010** — Identidad sin llaves: OIDC para el pipeline, IRSA para los pods.
+  Incluye el hallazgo que costó un despliegue: GitHub firma el subject con
+  identificadores numéricos inmutables, no con `repo:owner/repo` como dice la
+  documentación, y eso solo se descubre mirando CloudTrail.
+
+**Estado real de F6**, para no engañarse: los tres bloques están escritos y el
+demo público está **encendido, público y verificado punta a punta**. Lo que
+**no** está aplicado es `terraform/aws-eks/`, así que ese módulo está validado y
+planificado pero nunca ejecutado. F5 y F6 ya enseñaron tres veces que el código
+sin aplicar esconde fallos: hay que dar por hecho que EKS tiene alguno.
 
 ## 11. Estructura del repositorio
 
