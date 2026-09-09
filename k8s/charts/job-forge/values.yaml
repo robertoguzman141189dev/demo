@@ -62,17 +62,33 @@ ingress:
   # Estos números frenan a una persona insistiendo. NO frenan a cien IP
   # distintas: para eso está SubmissionBudget, que cuenta sin mirar de dónde
   # viene la petición.
+  # OJO con cómo se calcula la ráfaga, que costó una prueba fallida descubrirlo:
+  # ingress-nginx NO usa el multiplicador como un extra, lo usa para calcular el
+  # tamaño de la ráfaga MULTIPLICANDO el límite.
+  #
+  #   ráfaga = límite × multiplicador
+  #
+  # Con `limit-rpm: 60` y multiplicador 3, la ráfaga son 180 peticiones de golpe.
+  # Cuarenta peticiones seguidas pasaron sin que el límite se enterara. Por eso
+  # ahora se expresa en peticiones por SEGUNDO: el número que se lee es el mismo
+  # orden de magnitud que la ráfaga que produce, y deja de sorprender.
   limits:
-    # Holgado: una primera visita al panel descarga varios ficheros seguidos.
-    panelRequestsPerMinute: 300
+    # 20/s con ráfaga de 100: una primera visita descarga varios ficheros de
+    # golpe y no debe encontrarse un error.
+    panelRequestsPerSecond: 20
+    panelBurstMultiplier: 5
     panelConnections: 20
-    # Estricto: cada petición aquí publica mensajes en las colas. 60 por minuto
-    # es una por segundo, de sobra para jugar con el panel a mano.
-    apiRequestsPerMinute: 60
-    # Deja pasar una ráfaga corta —pulsar el botón dos veces no debe dar error—
-    # sin subir el ritmo sostenido.
-    apiBurstMultiplier: 3
+    # 2/s con ráfaga de 10. Cada petición aquí publica mensajes en las colas, así
+    # que se acota de verdad: diez seguidas pasan —pulsar el botón varias veces no
+    # debe fallar— y a partir de ahí manda el ritmo sostenido.
+    apiRequestsPerSecond: 2
+    apiBurstMultiplier: 5
     apiConnections: 10
+    # 429 y no el 503 que nginx devuelve por defecto. Un 503 dice "el servicio no
+    # está disponible", que es falso y engañoso; 429 dice "has pedido demasiado",
+    # que es la verdad. Y así las dos capas —el límite por IP y el tope global del
+    # API— hablan el mismo idioma.
+    statusCode: 429
 
 # Reparto entre nodos. Se queda apagado en kind, que tiene un nodo solo: con un
 # único nodo la restricción no se puede satisfacer y los pods se quedarían en

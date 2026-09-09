@@ -29,8 +29,11 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     # Holgado: una primera visita descarga varios ficheros de golpe.
-    nginx.ingress.kubernetes.io/limit-rpm: {{ .Values.ingress.limits.panelRequestsPerMinute | quote }}
+    # La ráfaga resultante es limit-rps × limit-burst-multiplier.
+    nginx.ingress.kubernetes.io/limit-rps: {{ .Values.ingress.limits.panelRequestsPerSecond | quote }}
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: {{ .Values.ingress.limits.panelBurstMultiplier | quote }}
     nginx.ingress.kubernetes.io/limit-connections: {{ .Values.ingress.limits.panelConnections | quote }}
+    nginx.ingress.kubernetes.io/limit-req-status-code: {{ .Values.ingress.limits.statusCode | quote }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -68,11 +71,13 @@ metadata:
   annotations:
     # Aquí está el freno. Estos endpoints publican mensajes en las colas, así que
     # cada petición cuesta trabajo real al cluster.
-    nginx.ingress.kubernetes.io/limit-rpm: {{ .Values.ingress.limits.apiRequestsPerMinute | quote }}
-    # Permite una ráfaga corta —pulsar el botón dos veces seguidas no debe dar un
-    # error— sin subir el ritmo sostenido.
+    # Ráfaga = limit-rps × limit-burst-multiplier. Con 2 y 5 son diez peticiones
+    # de golpe y luego dos por segundo: pulsar el botón varias veces no falla,
+    # pero un bucle se topa con el límite enseguida.
+    nginx.ingress.kubernetes.io/limit-rps: {{ .Values.ingress.limits.apiRequestsPerSecond | quote }}
     nginx.ingress.kubernetes.io/limit-burst-multiplier: {{ .Values.ingress.limits.apiBurstMultiplier | quote }}
     nginx.ingress.kubernetes.io/limit-connections: {{ .Values.ingress.limits.apiConnections | quote }}
+    nginx.ingress.kubernetes.io/limit-req-status-code: {{ .Values.ingress.limits.statusCode | quote }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
