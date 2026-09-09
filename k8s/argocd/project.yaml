@@ -24,7 +24,15 @@ spec:
 
   # A dónde. El namespace de cada demo, el de los brokers y el del Ingress; no el
   # de kube-system, y no un comodín.
+  #
+  # argocd está en la lista por un motivo que cuesta un despliegue descubrir: la
+  # aplicación raíz del patrón "app of apps" despliega OTRAS Application, y una
+  # Application es un objeto que vive en el namespace de Argo. Sin este destino,
+  # el proyecto rechaza su propia raíz con un InvalidSpecError y nada llega a
+  # sincronizarse.
   destinations:
+    - server: https://kubernetes.default.svc
+      namespace: argocd
     - server: https://kubernetes.default.svc
       namespace: job-forge
     - server: https://kubernetes.default.svc

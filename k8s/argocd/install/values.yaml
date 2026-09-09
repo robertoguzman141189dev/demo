@@ -68,8 +68,16 @@ notifications:
 # Genera Applications a partir de plantillas, por ejemplo una por cada rama o por
 # cada cluster. Con dos demos escritos a mano no aporta nada todavía. Cuando
 # llegue stream-guard puede tener sentido reconsiderarlo.
+#
+# OJO: en el chart 9.x este componente NO tiene una clave `enabled`. Poner
+# `applicationSet.enabled: false` es un no-op que Helm ignora en silencio —así
+# estaba antes, y el pod aparecía igual—. La única forma de que no consuma
+# memoria es dejar el Deployment a cero réplicas.
+#
+# No es elegante, pero es honesto: el componente queda instalado y parado, y en
+# un nodo de 4 GiB compartidos con dos brokers eso son ~100 MiB que sí importan.
 applicationSet:
-  enabled: false
+  replicas: 0
 
 redis:
   resources:
