@@ -87,6 +87,31 @@ export class App implements OnInit {
   /** Tareas esperando en cualquiera de los tres tramos, para pintarlo en el nodo. */
   protected readonly waiting = computed(() => this.panel.waiting());
 
+  /**
+   * El pulso del sistema: tres cifras que se leen de lejos.
+   *
+   * Existe porque para saber si esto estaba tranquilo o ahogado había que leer
+   * cinco números pequeños y sumarlos mentalmente. El estado de un sistema tiene
+   * que verse antes de leerse.
+   */
+  protected readonly pulse = computed(() => ({
+    enCola: this.depth('jobs.work'),
+    esperando: this.panel.waiting(),
+    muertas: this.depth('jobs.dead'),
+    completadas: this.panel.events().filter((e) => e.type === 'COMPLETED').length,
+  }));
+
+  /**
+   * Una sola palabra para el estado general, que es lo que de verdad quiere
+   * saber quien llega: ¿esto está bien o hay algo roto?
+   */
+  protected readonly mood = computed(() => {
+    const p = this.pulse();
+    if (p.muertas > 0) return 'con bajas';
+    if (p.enCola + p.esperando > 0) return 'trabajando';
+    return 'en reposo';
+  });
+
   constructor() {
     // Una animación por cada evento que llega. Se observa lastEvent y no la
     // lista: la lista cambia también al descartar los viejos, y eso dispararía
@@ -106,6 +131,20 @@ export class App implements OnInit {
 
   protected depth(queue: string): number {
     return this.panel.queues()[queue] ?? 0;
+  }
+
+  /**
+   * El ancho de la barra, medido contra la cola más llena y no contra un número
+   * fijo.
+   *
+   * Antes era `profundidad * 4` como porcentaje, así que **se saturaba a los 25
+   * mensajes**: con 200 tareas encoladas, las cinco barras se veían idénticas y
+   * la comparación entre tramos dejaba de significar nada. Relativo al máximo,
+   * la proporción siempre se lee.
+   */
+  protected barWidth(queue: string): number {
+    const max = Math.max(...this.queueOrder.map((q) => this.depth(q)), 1);
+    return (this.depth(queue) / max) * 100;
   }
 
   private animate(event: JobEvent): void {

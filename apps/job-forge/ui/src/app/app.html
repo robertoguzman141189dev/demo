@@ -1,59 +1,43 @@
 <header>
-  <div>
+  <div class="identity">
     <h1>job-forge</h1>
     <p class="claim">
       La resiliencia en la entrega es un problema distinto al del throughput.
-      Rompe el sistema y mira cómo lo absorbe.
+      <strong>Rompe el sistema y mira cómo lo absorbe.</strong>
     </p>
   </div>
   <span class="status" [class.on]="panel.connected()">
+    <span class="dot"></span>
     {{ panel.connected() ? 'en vivo' : 'sin conexión' }}
   </span>
 </header>
 
-<section class="levers">
-  <h2>Palancas</h2>
-
-  <label>
-    Tareas
-    <input type="number" min="1" max="200" [(ngModel)]="tasks" />
-  </label>
-
-  <label>
-    Tasa de fallo del worker: <strong>{{ failProbability() }}%</strong>
-    <input type="range" min="0" max="100" step="5" [(ngModel)]="failProbability" />
-    <small>Viaja estampada en cada tarea, así que todas las réplicas aplican lo mismo.</small>
-  </label>
-
-  <label>
-    Prioridad
-    <select [(ngModel)]="priority">
-      <option value="NORMAL">normal</option>
-      <option value="HIGH">alta — adelanta a las normales</option>
-    </select>
-  </label>
-
-  <div class="actions">
-    <button type="button" (click)="generate()" [disabled]="busy()">Generar tareas</button>
-    <label class="file">
-      Subir archivo
-      <input type="file" (change)="upload($event)" [disabled]="busy()" />
-    </label>
-    <button type="button" class="link" (click)="downloadSample()">
-      descargar un archivo de ejemplo
-    </button>
+<!-- El pulso. Tres cifras grandes antes que cualquier control: quien llega
+     quiere saber si esto está vivo, no configurarlo. -->
+<section class="pulse" [attr.data-mood]="mood()">
+  <div class="stat">
+    <span class="figure">{{ pulse().enCola }}</span>
+    <span class="label">en cola</span>
+    <span class="note">esperando un worker libre</span>
   </div>
-  <p class="hint upload-hint">
-    <strong>No necesitas ningún archivo:</strong> «Generar tareas» crea trabajo
-    sintético y es el camino corto. Si quieres subir uno, vale cualquier texto
-    —<span class="mono">.txt</span>, <span class="mono">.csv</span>, un log— y la
-    regla es <strong>una línea, una tarea</strong>. Máximo 200 líneas y 256 KB. No
-    se almacena en ningún sitio: se lee, se parte y se descarta.
+  <div class="stat waiting">
+    <span class="figure">{{ pulse().esperando }}</span>
+    <span class="label">esperando</span>
+    <span class="note">cumpliendo su backoff</span>
+  </div>
+  <div class="stat dead">
+    <span class="figure">{{ pulse().muertas }}</span>
+    <span class="label">muertas</span>
+    <span class="note">agotaron los intentos</span>
+  </div>
+  <div class="stat done">
+    <span class="figure">{{ pulse().completadas }}</span>
+    <span class="label">completadas</span>
+    <span class="note">en lo que llevas mirando</span>
+  </div>
+  <p class="mood">
+    El sistema está <strong>{{ mood() }}</strong>.
   </p>
-
-  @if (message()) {
-    <p class="message">{{ message() }}</p>
-  }
 </section>
 
 <section class="topology">
@@ -177,21 +161,53 @@
   </p>
 </section>
 
-<section class="queues">
-  <h2>Colas</h2>
-  <p class="hint">
-    Las tres de espera no tienen consumidor: nadie las lee nunca. Su única función
-    es que el tiempo pase, y por eso el backoff no necesita ningún scheduler.
+<section class="levers">
+  <h2>Palancas</h2>
+
+  <div class="controls">
+    <label>
+      Tareas
+      <input type="number" min="1" max="200" [(ngModel)]="tasks" />
+    </label>
+
+    <label>
+      Tasa de fallo: <strong>{{ failProbability() }}%</strong>
+      <input type="range" min="0" max="100" step="5" [(ngModel)]="failProbability" />
+      <small>Viaja estampada en cada tarea, así que todas las réplicas aplican lo mismo.</small>
+    </label>
+
+    <label>
+      Prioridad
+      <select [(ngModel)]="priority">
+        <option value="NORMAL">normal</option>
+        <option value="HIGH">alta — adelanta a las normales</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="actions">
+    <button type="button" (click)="generate()" [disabled]="busy()">Generar tareas</button>
+    <label class="file">
+      Subir archivo
+      <input type="file" (change)="upload($event)" [disabled]="busy()" />
+    </label>
+    <button type="button" class="link" (click)="downloadSample()">
+      descargar un archivo de ejemplo
+    </button>
+  </div>
+  <p class="hint upload-hint">
+    <strong>No necesitas ningún archivo:</strong> «Generar tareas» crea trabajo
+    sintético y es el camino corto. Si quieres subir uno, vale cualquier texto
+    —<span class="mono">.txt</span>, <span class="mono">.csv</span>, un log— y la
+    regla es <strong>una línea, una tarea</strong>. Máximo 200 líneas y 256 KB. No
+    se almacena en ningún sitio: se lee, se parte y se descarta.
   </p>
 
-  @for (queue of queueOrder; track queue) {
-    <div class="queue" [class.dead]="queue === 'jobs.dead'">
-      <span class="name">{{ queue }}</span>
-      <span class="bar"><span class="fill" [style.width.%]="depth(queue) * 4"></span></span>
-      <span class="count">{{ depth(queue) }}</span>
-    </div>
+  @if (message()) {
+    <p class="message">{{ message() }}</p>
   }
 </section>
+
 
 <section class="journey">
   <h2>El viaje de una tarea</h2>
@@ -244,6 +260,27 @@
     </p>
   }
 </section>
+
+<section class="queues">
+  <h2>Colas</h2>
+  <p class="hint">
+    Las tres de espera no tienen consumidor: nadie las lee nunca. Su única función
+    es que el tiempo pase, y por eso el backoff no necesita ningún scheduler.
+  </p>
+
+  @for (queue of queueOrder; track queue) {
+    <div
+      class="queue"
+      [class.dead]="queue === 'jobs.dead'"
+      [class.waiting]="queue.startsWith('jobs.retry.')"
+    >
+      <span class="name">{{ queue }}</span>
+      <span class="bar"><span class="fill" [style.width.%]="barWidth(queue)"></span></span>
+      <span class="count">{{ depth(queue) }}</span>
+    </div>
+  }
+</section>
+
 
 <section class="dead">
   <h2>Cola muerta</h2>

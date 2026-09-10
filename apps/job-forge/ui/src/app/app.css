@@ -1,65 +1,276 @@
+/* ===========================================================================
+   VOCABULARIO VISUAL
+   ---------------------------------------------------------------------------
+   El color aquí no decora: nombra estados. Un visitante aprende el idioma en
+   los primeros diez segundos mirando el pulso, y a partir de ahí lo reconoce en
+   el diagrama, en el viaje y en el feed sin que nadie se lo explique.
+
+     azul     el flujo normal          ámbar   esperando su turno o su backoff
+     verde    completada               rojo    muerta, agotó los intentos
+     morado   todo lo que es Kafka     gris    estructura, nunca estado
+
+   Un color que a veces significa una cosa y a veces otra no es un idioma: es
+   ruido. Por eso el punteado del reproceso es gris y no morado.
+   =========================================================================== */
+
 :host {
+  --tinta: #14171c;
+  --tinta-suave: #4b5563;
+  --tenue: #6b7280;
+  --apagado: #9ca3af;
+  --linea: #e5e7eb;
+  --linea-suave: #f1f2f4;
+  --fondo: #fbfbfc;
+  --papel: #fff;
+
+  --flujo: #2563eb;
+  --espera: #b45309;
+  --hecho: #15803d;
+  --muerte: #b91c1c;
+  --log: #6d28d9;
+
+  --sombra: 0 1px 2px rgb(20 23 28 / 5%), 0 4px 12px rgb(20 23 28 / 4%);
+  --radio: 12px;
+
   display: block;
-  max-width: 1100px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 2rem 1.5rem 4rem;
+  padding: 2.5rem 1.5rem 5rem;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: #1c1f24;
+  color: var(--tinta);
+  background: var(--fondo);
 }
 
 header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 1rem;
-  border-bottom: 2px solid #1c1f24;
-  padding-bottom: 1rem;
+  gap: 1.5rem;
+  flex-wrap: wrap;
 }
 
-h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
-h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; margin: 0 0 0.75rem; }
-.claim { margin: 0.35rem 0 0; color: #4b5563; max-width: 52ch; }
+h1 {
+  margin: 0;
+  font-size: 2.6rem;
+  letter-spacing: -0.035em;
+  font-weight: 700;
+  line-height: 1;
+}
+h2 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--apagado);
+  margin: 0 0 0.6rem;
+  font-weight: 600;
+}
+.claim {
+  margin: 0.7rem 0 0;
+  color: var(--tinta-suave);
+  max-width: 46ch;
+  font-size: 1.02rem;
+  line-height: 1.5;
+}
+.claim strong { color: var(--tinta); }
 
+/* El indicador de conexión lleva un punto que late: el estado se ve antes de
+   leerse, que es el principio que gobierna toda esta pantalla. */
 .status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   font-size: 0.8rem;
-  padding: 0.25rem 0.6rem;
+  padding: 0.35rem 0.75rem;
   border-radius: 999px;
-  background: #f3f4f6;
-  color: #6b7280;
+  background: var(--linea-suave);
+  color: var(--tenue);
   white-space: nowrap;
+  font-weight: 500;
 }
-.status.on { background: #dcfce7; color: #166534; }
+.status .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--apagado); }
+.status.on { background: #ecfdf3; color: var(--hecho); }
+.status.on .dot { background: var(--hecho); animation: respira 2s ease-in-out infinite; }
+@keyframes respira {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
 
-section { margin-top: 2rem; }
-.hint { margin: -0.4rem 0 1rem; color: #6b7280; font-size: 0.85rem; max-width: 68ch; }
+/* Cada sección es una tarjeta. Antes todas pesaban igual y el ojo no tenía
+   dónde aterrizar; ahora cada bloque es una unidad con su propio aire. */
+section {
+  margin-top: 1.5rem;
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio);
+  padding: 1.5rem 1.6rem;
+  box-shadow: var(--sombra);
+}
 
-.levers label { display: block; margin-bottom: 0.9rem; font-size: 0.9rem; }
-.levers input[type="number"] { display: block; width: 6rem; padding: 0.35rem; margin-top: 0.25rem; }
-.levers input[type="range"] { display: block; width: 100%; max-width: 24rem; margin-top: 0.35rem; }
-.levers select { display: block; margin-top: 0.25rem; padding: 0.35rem; }
-.levers small { display: block; color: #6b7280; margin-top: 0.2rem; }
+.hint {
+  margin: -0.25rem 0 1.1rem;
+  color: var(--tenue);
+  font-size: 0.88rem;
+  max-width: 76ch;
+  line-height: 1.55;
+}
+.hint strong { color: var(--tinta-suave); }
 
-.actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
-button {
-  padding: 0.5rem 1rem;
-  border: 1px solid #1c1f24;
-  background: #1c1f24;
-  color: #fff;
-  border-radius: 6px;
-  cursor: pointer;
+/* ------------------------------------------------------------- el pulso ----
+   Cuatro cifras grandes antes que cualquier control. Quien llega quiere saber
+   si esto está vivo y si va bien; configurarlo viene después, si es que viene. */
+
+.pulse {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+.pulse .stat { display: flex; flex-direction: column; gap: 0.15rem; }
+.pulse .figure {
+  font-size: 2.9rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--flujo);
+}
+.pulse .waiting .figure { color: var(--espera); }
+.pulse .dead .figure { color: var(--muerte); }
+.pulse .done .figure { color: var(--hecho); }
+.pulse .label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tinta-suave);
+  margin-top: 0.35rem;
+}
+.pulse .note { font-size: 0.78rem; color: var(--apagado); line-height: 1.35; }
+
+.pulse .mood {
+  grid-column: 1 / -1;
+  margin: 0.4rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--linea-suave);
   font-size: 0.9rem;
+  color: var(--tenue);
 }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
-label.file { border: 1px dashed #9ca3af; padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 0.9rem; cursor: pointer; }
-label.file input { display: none; }
-.message { margin-top: 0.8rem; font-size: 0.88rem; color: #166534; }
+.pulse .mood strong { color: var(--tinta); }
+/* Cuando hay bajas, el borde de la tarjeta lo dice sin gritar. */
+.pulse[data-mood="con bajas"] { border-color: #fecaca; }
+.pulse[data-mood="trabajando"] { border-color: #bfdbfe; }
 
-.queue { display: grid; grid-template-columns: 10rem 1fr 3rem; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem; }
-.queue .name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; color: #374151; }
-.queue .bar { background: #f3f4f6; height: 1.1rem; border-radius: 3px; overflow: hidden; }
-.queue .fill { display: block; height: 100%; background: #2563eb; max-width: 100%; transition: width 0.4s ease; }
-.queue.dead .fill { background: #b91c1c; }
-.queue .count { text-align: right; font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+@media (max-width: 720px) {
+  .pulse { grid-template-columns: repeat(2, 1fr); }
+  h1 { font-size: 2rem; }
+}
+
+/* ----------------------------------------------------------- las palancas ---
+   En horizontal: son tres ajustes cortos, y apilados verticalmente ocupaban
+   media pantalla antes de dejarte pulsar nada. */
+
+.levers .controls {
+  display: grid;
+  grid-template-columns: 7rem minmax(12rem, 22rem) 1fr;
+  gap: 1.5rem;
+  /* Alineado ARRIBA, no abajo. Alineando por abajo, el texto de ayuda del
+     deslizador empujaba su columna y las tres etiquetas quedaban a alturas
+     distintas. Una fila de controles que no cuadra se lee como descuido, y el
+     descuido resta credibilidad a todo lo que hay alrededor. */
+  align-items: start;
+  margin-bottom: 1.4rem;
+}
+.levers label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--tinta-suave);
+  /* Reserva sitio para una línea de etiqueta, para que los controles de las tres
+     columnas arranquen exactamente a la misma altura. */
+  min-height: 1.2rem;
+}
+.levers input[type="number"],
+.levers select {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  margin-top: 0.35rem;
+  border: 1px solid var(--linea);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: var(--tinta);
+  background: var(--papel);
+}
+.levers input[type="number"]:focus-visible,
+.levers select:focus-visible { outline: 2px solid var(--flujo); outline-offset: 1px; }
+.levers input[type="range"] { display: block; width: 100%; margin-top: 0.6rem; accent-color: var(--espera); }
+.levers small { display: block; color: var(--apagado); margin-top: 0.35rem; font-size: 0.76rem; }
+.levers label strong { color: var(--espera); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 720px) {
+  .levers .controls { grid-template-columns: 1fr; gap: 1rem; }
+}
+
+.actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+
+/* Una sola acción principal, y se nota. Antes «Generar tareas» era un botón más
+   entre etiquetas y nadie sabía por dónde empezar. */
+button {
+  padding: 0.65rem 1.4rem;
+  border: 1px solid var(--tinta);
+  background: var(--tinta);
+  color: #fff;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--sombra); }
+button:active:not(:disabled) { transform: translateY(0); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:focus-visible { outline: 2px solid var(--flujo); outline-offset: 2px; }
+
+label.file {
+  border: 1px dashed var(--apagado);
+  padding: 0.6rem 1.1rem;
+  border-radius: 9px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: var(--tinta-suave);
+}
+label.file:hover { border-color: var(--tinta-suave); color: var(--tinta); }
+label.file input { display: none; }
+
+.message {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--hecho);
+  background: #ecfdf3;
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+}
+
+/* --------------------------------------------------------------- colas -----
+   La barra ya no satura a los 25 mensajes: se mide contra la cola más llena,
+   así que la comparación entre tramos siempre significa algo. */
+
+.queue { display: grid; grid-template-columns: 9rem 1fr 3rem; align-items: center; gap: 0.9rem; margin-bottom: 0.5rem; }
+.queue .name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; color: var(--tinta-suave); }
+.queue .bar { background: var(--linea-suave); height: 1.35rem; border-radius: 5px; overflow: hidden; }
+.queue .fill {
+  display: block;
+  height: 100%;
+  background: var(--flujo);
+  max-width: 100%;
+  border-radius: 5px;
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.queue.waiting .fill { background: var(--espera); }
+.queue.dead .fill { background: var(--muerte); }
+.queue .count { text-align: right; font-variant-numeric: tabular-nums; font-size: 0.9rem; font-weight: 600; }
 
 table { width: 100%; border-collapse: collapse; margin-top: 0.9rem; font-size: 0.85rem; }
 th { text-align: left; color: #6b7280; font-weight: 500; border-bottom: 1px solid #e5e7eb; padding: 0.35rem 0; }
