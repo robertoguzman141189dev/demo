@@ -62,6 +62,16 @@ export class PanelService {
   readonly events = signal<JobEvent[]>([]);
   readonly deadLetters = signal<DeadLetter[]>([]);
 
+  /**
+   * El último evento recibido, como señal aparte del historial.
+   *
+   * Existe para que la topología pueda lanzar una animación por cada evento que
+   * LLEGA. Observar `events` no sirve: esa señal cambia por cualquier motivo
+   * —incluido descartar los viejos— y no distingue "hay uno nuevo" de "la lista
+   * es otra". Aquí cada asignación es exactamente un evento entrante.
+   */
+  readonly lastEvent = signal<JobEvent | null>(null);
+
   readonly deadCount = computed(() => this.queues()['jobs.dead'] ?? 0);
   readonly waiting = computed(() =>
     Object.entries(this.queues())
@@ -153,6 +163,7 @@ export class PanelService {
           // se estaba mirando desaparecía en cuanto había algo de tráfico. 200
           // eventos son unos pocos kilobytes.
           this.events.update((current) => [payload.event, ...current].slice(0, 200));
+          this.lastEvent.set(payload.event);
         }
       });
     };

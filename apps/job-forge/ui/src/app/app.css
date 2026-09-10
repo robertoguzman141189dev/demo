@@ -67,6 +67,94 @@ td { padding: 0.35rem 0; border-bottom: 1px solid #f3f4f6; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .empty { color: #9ca3af; font-size: 0.88rem; }
 
+/* ------------------------------------------------------ la topología viva --
+   Cada punto que se mueve es un mensaje real. Las partículas recorren la arista
+   con offset-path, que es lo que permite animar sobre una curva arbitraria sin
+   calcular posiciones a mano ni traer una librería. */
+
+.diagram { width: 100%; height: auto; display: block; margin-top: 0.5rem; }
+
+.half { fill: #fafafa; stroke: #e5e7eb; stroke-width: 1; }
+.half.kafka { fill: #faf9fe; stroke: #e9e5f7; }
+.half-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  fill: #9ca3af;
+}
+
+.edges path { fill: none; stroke: #d1d5db; stroke-width: 1.5; }
+/* Punteado morado: lo que va o viene de Kafka. */
+.edges path.dashed { stroke-dasharray: 4 4; stroke: #c4b5fd; }
+/* Punteado gris: lo que no ocurre solo, sino que lo dispara una persona. */
+.edges path.manual { stroke: #d1d5db; }
+
+.node rect { fill: #fff; stroke: #d1d5db; stroke-width: 1.5; }
+.node text { font-size: 12px; fill: #1c1f24; text-anchor: middle; font-weight: 600; }
+.node text.sub { font-size: 10px; fill: #9ca3af; font-weight: 400; }
+.node text.count { font-size: 11px; fill: #6b7280; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.node.api rect { stroke: #1c1f24; }
+.node.bus rect { stroke: #2563eb; }
+.node.worker rect { stroke: #166534; }
+.node.retry rect { stroke: #b45309; }
+.node.dead rect { stroke: #b91c1c; }
+.node.kafka rect { stroke: #6d28d9; }
+.node.kafka text { fill: #4c1d95; }
+
+/* Un nodo con mensajes dentro respira. Es la señal que se ve sin leer el número. */
+.node.busy rect { animation: latido 1.6s ease-in-out infinite; }
+@keyframes latido {
+  0%, 100% { stroke-width: 1.5; }
+  50% { stroke-width: 3.5; }
+}
+
+.particle {
+  fill: #6b7280;
+  offset-rotate: 0deg;
+  animation: recorrer 1.1s linear forwards;
+}
+.particle.tone-exito { fill: #166534; }
+.particle.tone-reintento { fill: #b45309; }
+.particle.tone-muerte { fill: #b91c1c; }
+
+@keyframes recorrer {
+  from { offset-distance: 0%; opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  to   { offset-distance: 100%; opacity: 0; }
+}
+
+/* Cada arista define el camino que recorren sus partículas. Las rutas repiten
+   las de los <path> de arriba: si se mueve un nodo, hay que cambiar las dos. */
+.edge-api-work        { offset-path: path("M120,142 H290"); }
+.edge-work-worker     { offset-path: path("M400,142 H440"); }
+.edge-worker-retry    { offset-path: path("M485,164 V235 H400"); }
+.edge-retry-exchange  { offset-path: path("M200,235 H180 V164"); }
+.edge-work-dead       { offset-path: path("M345,120 V88"); }
+.edge-dead-exchange   { offset-path: path("M290,68 H180 V120"); }
+.edge-worker-kafka    { offset-path: path("M530,142 H560 V80 H600"); }
+
+.reconstruye { margin-top: 0.9rem; }
+
+/* Quien haya pedido menos movimiento no debería tener puntos volando. */
+@media (prefers-reduced-motion: reduce) {
+  .particle { animation-duration: 0.01ms; opacity: 0; }
+  .node.busy rect { animation: none; stroke-width: 3; }
+}
+
+.upload-hint { margin-top: 0.9rem; }
+.actions .link {
+  background: none;
+  border: none;
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+}
+
 /* --------------------------------------------------- el viaje de una tarea --
    La espera entre pasos es el dato importante, así que se pinta como un tramo
    con altura propia en vez de como texto pequeño: cuanto más se esperó, más
@@ -140,15 +228,20 @@ td { padding: 0.35rem 0; border-bottom: 1px solid #f3f4f6; }
 .steps .step[data-type="DEAD_LETTERED"] .what { color: #b91c1c; }
 .steps .step .attempt, .steps .step .detail { color: #6b7280; }
 
-/* El tramo de espera. Aquí es donde se ve el escalonado. */
+/* El tramo de espera. Aquí es donde se ve el escalonado.
+   Se distingue por COLOR según dónde esperó, porque son dos cosas distintas:
+   ámbar = el backoff funcionando; gris = simplemente había cola. */
 .steps .wait {
   position: relative;
   margin-left: -1.1rem;
   padding: 0.5rem 0 0.5rem 1.1rem;
   font-size: 0.78rem;
-  color: #b45309;
+  color: #9ca3af;
   font-variant-numeric: tabular-nums;
 }
+.steps .wait strong { color: #6b7280; }
+.steps .wait[data-kind="backoff"] { color: #b45309; }
+.steps .wait[data-kind="backoff"] strong { color: #92400e; }
 .steps .wait::before {
   content: "";
   position: absolute;
@@ -156,6 +249,9 @@ td { padding: 0.35rem 0; border-bottom: 1px solid #f3f4f6; }
   top: 0;
   bottom: 0;
   width: 2px;
+  background: repeating-linear-gradient(#d1d5db 0 4px, transparent 4px 8px);
+}
+.steps .wait[data-kind="backoff"]::before {
   background: repeating-linear-gradient(#b45309 0 4px, transparent 4px 8px);
 }
 /* Una espera larga ocupa más alto: el escalonado se ve antes de leer el número. */
@@ -168,7 +264,11 @@ td { padding: 0.35rem 0; border-bottom: 1px solid #f3f4f6; }
   padding: 0.3rem 0;
   border-bottom: 1px solid #f3f4f6;
   font-size: 0.82rem;
-  /* Ahora es un botón: hay que deshacer lo que el navegador le pone. */
+  /* Ahora es un botón: hay que deshacer lo que el navegador le pone.
+     `color: inherit` no es opcional. Un <button> NO hereda el color del texto:
+     usa el del sistema, y con el fondo quitado el identificador de tarea y los
+     tipos sin regla de color propia salieron casi invisibles en el demo real.
+     Compilaba sin avisos y solo se vio abriendo la página. */
   width: 100%;
   text-align: left;
   background: none;
@@ -176,8 +276,11 @@ td { padding: 0.35rem 0; border-bottom: 1px solid #f3f4f6; }
   border-right: none;
   border-top: none;
   font-family: inherit;
+  color: inherit;
   cursor: pointer;
 }
+.event .mono { color: #374151; }
+.event .type { color: #4b5563; }
 .event:hover { background: #f9fafb; }
 .event.pinned { background: #eff6ff; }
 .event .type { font-weight: 600; font-size: 0.72rem; letter-spacing: 0.04em; }

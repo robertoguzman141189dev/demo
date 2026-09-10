@@ -39,11 +39,142 @@
       Subir archivo
       <input type="file" (change)="upload($event)" [disabled]="busy()" />
     </label>
+    <button type="button" class="link" (click)="downloadSample()">
+      descargar un archivo de ejemplo
+    </button>
   </div>
+  <p class="hint upload-hint">
+    <strong>No necesitas ningún archivo:</strong> «Generar tareas» crea trabajo
+    sintético y es el camino corto. Si quieres subir uno, vale cualquier texto
+    —<span class="mono">.txt</span>, <span class="mono">.csv</span>, un log— y la
+    regla es <strong>una línea, una tarea</strong>. Máximo 200 líneas y 256 KB. No
+    se almacena en ningún sitio: se lee, se parte y se descarta.
+  </p>
 
   @if (message()) {
     <p class="message">{{ message() }}</p>
   }
+</section>
+
+<section class="topology">
+  <h2>El sistema, en vivo</h2>
+  <p class="hint">
+    Cada punto que se mueve es un mensaje real. A la izquierda, <strong>RabbitMQ</strong>:
+    la entrega, con su cola de trabajo, sus tres tramos de espera y su cola de
+    muertos. A la derecha, <strong>Kafka</strong>: el log de auditoría del que este
+    panel se alimenta. Si borraras Kafka, las tareas seguirían procesándose; si
+    borraras RabbitMQ, no se procesaría ninguna. Esa asimetría es el diseño.
+  </p>
+
+  <svg class="diagram" viewBox="0 0 900 300" role="img"
+       aria-label="Diagrama en vivo del recorrido de una tarea">
+    <!-- Puntas de flecha. Sin ellas, en reposo el diagrama son cajas unidas por
+         rayas y no se ve hacia dónde va nada: la dirección solo se adivinaba
+         cuando había partículas moviéndose. -->
+    <defs>
+      <marker id="punta" viewBox="0 0 8 8" refX="7" refY="4"
+              markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L8,4 L0,8 z" fill="#9ca3af" />
+      </marker>
+      <marker id="punta-tenue" viewBox="0 0 8 8" refX="7" refY="4"
+              markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L8,4 L0,8 z" fill="#c4b5fd" />
+      </marker>
+    </defs>
+
+    <!-- Las dos mitades, para que se vea de un golpe que son dos sistemas. -->
+    <rect class="half rabbit" x="10" y="18" width="560" height="270" rx="10" />
+    <text class="half-label" x="24" y="38">RabbitMQ — la entrega</text>
+    <rect class="half kafka" x="590" y="18" width="300" height="270" rx="10" />
+    <text class="half-label" x="604" y="38">Kafka — el log</text>
+
+    <!-- Aristas. El orden importa: van debajo de los nodos. -->
+    <g class="edges" marker-end="url(#punta)">
+      <path id="api-work" d="M120,142 H290" />
+      <path id="work-worker" d="M400,142 H440" />
+      <path id="worker-retry" d="M485,164 V235 H400" />
+      <path id="retry-exchange" d="M200,235 H180 V164" />
+      <path id="work-dead" d="M345,120 V88" />
+      <!-- El reproceso manual desde el panel. Punteado porque no ocurre solo,
+           pero en gris: el morado está reservado para lo que toca Kafka. -->
+      <path id="dead-exchange" d="M290,68 H180 V120" class="dashed manual" />
+      <path id="worker-kafka" d="M530,142 H560 V80 H600" />
+      <path id="eventos-proyector" d="M720,80 H750" />
+      <path id="proyector-estado" d="M805,100 V180" />
+      <path id="estado-worker" d="M680,200 H485 V164" class="dashed"
+            marker-end="url(#punta-tenue)" />
+    </g>
+
+    <!-- Nodos -->
+    <g class="node api">
+      <rect x="30" y="120" width="90" height="44" rx="6" />
+      <text x="75" y="147">API</text>
+    </g>
+
+    <g class="node bus">
+      <rect x="160" y="120" width="90" height="44" rx="6" />
+      <text x="205" y="141">jobs</text>
+      <text class="sub" x="205" y="156">exchange</text>
+    </g>
+
+    <g class="node bus" [class.busy]="depth('jobs.work') > 0">
+      <rect x="290" y="120" width="110" height="44" rx="6" />
+      <text x="345" y="141">jobs.work</text>
+      <text class="count" x="345" y="157">{{ depth('jobs.work') }}</text>
+    </g>
+
+    <g class="node worker">
+      <rect x="440" y="120" width="90" height="44" rx="6" />
+      <text x="485" y="147">worker</text>
+    </g>
+
+    <g class="node retry" [class.busy]="waiting() > 0">
+      <rect x="200" y="215" width="200" height="40" rx="6" />
+      <text x="300" y="233">esperando · 5s · 30s · 2m</text>
+      <text class="count" x="300" y="248">{{ waiting() }}</text>
+    </g>
+
+    <g class="node dead" [class.busy]="depth('jobs.dead') > 0">
+      <rect x="290" y="48" width="110" height="40" rx="6" />
+      <text x="345" y="66">jobs.dead</text>
+      <text class="count" x="345" y="81">{{ depth('jobs.dead') }}</text>
+    </g>
+
+    <g class="node kafka">
+      <rect x="600" y="60" width="120" height="40" rx="6" />
+      <text x="660" y="78">trabajos</text>
+      <text class="sub" x="660" y="92">.eventos</text>
+    </g>
+
+    <g class="node kafka">
+      <rect x="750" y="60" width="110" height="40" rx="6" />
+      <text x="805" y="84">proyector</text>
+    </g>
+
+    <g class="node kafka">
+      <rect x="680" y="180" width="140" height="40" rx="6" />
+      <text x="750" y="198">trabajos</text>
+      <text class="sub" x="750" y="212">.estado — compactado</text>
+    </g>
+
+    <!-- Las partículas. Cada una lleva la clase de su arista, y el CSS la hace
+         recorrerla con offset-path. -->
+    @for (p of particles(); track p.id) {
+      <circle
+        class="particle"
+        [class]="'particle edge-' + p.edge + ' tone-' + p.tone"
+        [style.animation-delay.ms]="p.delayMs"
+        r="4"
+      />
+    }
+  </svg>
+
+  <p class="hint reconstruye">
+    La flecha punteada que vuelve de <span class="mono">trabajos.estado</span> al
+    worker es lo que RabbitMQ no puede hacer: al arrancar, el worker relee el
+    topic compactado y recupera qué tareas ya había completado. Un mensaje
+    consumido en RabbitMQ deja de existir; en Kafka sigue ahí para releerlo.
+  </p>
 </section>
 
 <section class="queues">
@@ -88,8 +219,13 @@
     <ol class="steps">
       @for (step of viaje.steps; track $index) {
         @if (step.waitedMs !== null) {
-          <li class="wait" [class.long]="step.waitedMs >= 4000">
-            esperó {{ formatWait(step.waitedMs) }}
+          <li
+            class="wait"
+            [class.long]="step.waitedMs >= 4000"
+            [attr.data-kind]="waitKind(viaje.steps[$index - 1].event.type)"
+          >
+            <strong>esperó {{ formatWait(step.waitedMs) }}</strong>
+            {{ waitExplanation(viaje.steps[$index - 1].event.type) }}
           </li>
         }
         <li class="step" [attr.data-type]="step.event.type">

@@ -1,6 +1,45 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Journey, PanelService } from './panel.service';
+import { JobEvent, Journey, PanelService } from './panel.service';
+
+/** Una partícula viajando por una arista de la topología. */
+interface Particle {
+  id: number;
+  /** Clase CSS de la arista, que es la que lleva el offset-path. */
+  edge: string;
+  /** Color: neutro, éxito, reintento o muerte. */
+  tone: string;
+  delayMs: number;
+}
+
+/**
+ * Qué recorre cada evento en el diagrama.
+ *
+ * Un evento puede encender más de una arista: una tarea que se completa viaja de
+ * la cola al worker Y deja su rastro en el log de Kafka. El retardo escalona el
+ * segundo tramo para que se vea como un recorrido y no como dos destellos.
+ */
+const RECORRIDOS: Record<string, { edge: string; tone: string; delayMs: number }[]> = {
+  SUBMITTED: [{ edge: 'api-work', tone: 'neutro', delayMs: 0 }],
+  COMPLETED: [
+    { edge: 'work-worker', tone: 'exito', delayMs: 0 },
+    { edge: 'worker-kafka', tone: 'exito', delayMs: 700 },
+  ],
+  RETRY_SCHEDULED: [
+    { edge: 'worker-retry', tone: 'reintento', delayMs: 0 },
+    { edge: 'retry-exchange', tone: 'reintento', delayMs: 900 },
+    { edge: 'worker-kafka', tone: 'reintento', delayMs: 300 },
+  ],
+  DEAD_LETTERED: [
+    { edge: 'work-dead', tone: 'muerte', delayMs: 0 },
+    { edge: 'worker-kafka', tone: 'muerte', delayMs: 300 },
+  ],
+  REPROCESSED: [{ edge: 'dead-exchange', tone: 'neutro', delayMs: 0 }],
+  DUPLICATE_DISCARDED: [{ edge: 'worker-kafka', tone: 'exito', delayMs: 0 }],
+};
+
+/** Lo que tarda una partícula en recorrer su arista. Debe coincidir con el CSS. */
+const DURACION_MS = 1100;
 
 @Component({
   selector: 'app-root',
@@ -41,6 +80,25 @@ export class App implements OnInit {
     return pinned ? journeys.find((j) => j.taskId === pinned) : journeys[0];
   });
 
+  /** Las partículas vivas ahora mismo en el diagrama. */
+  protected readonly particles = signal<Particle[]>([]);
+  private nextParticleId = 0;
+
+  /** Tareas esperando en cualquiera de los tres tramos, para pintarlo en el nodo. */
+  protected readonly waiting = computed(() => this.panel.waiting());
+
+  constructor() {
+    // Una animación por cada evento que llega. Se observa lastEvent y no la
+    // lista: la lista cambia también al descartar los viejos, y eso dispararía
+    // animaciones fantasma.
+    effect(() => {
+      const event = this.panel.lastEvent();
+      if (event) {
+        this.animate(event);
+      }
+    });
+  }
+
   ngOnInit(): void {
     this.panel.connect();
     this.panel.refreshDeadLetters();
@@ -50,9 +108,53 @@ export class App implements OnInit {
     return this.panel.queues()[queue] ?? 0;
   }
 
+  private animate(event: JobEvent): void {
+    const recorrido = RECORRIDOS[event.type];
+    if (!recorrido) {
+      return;
+    }
+
+    for (const tramo of recorrido) {
+      const particle: Particle = { id: this.nextParticleId++, ...tramo };
+      // Tope de partículas vivas: con una ráfaga de doscientas tareas, animarlas
+      // todas no se entiende y además hunde el navegador. Se quedan las últimas.
+      this.particles.update((current) => [...current, particle].slice(-30));
+
+      setTimeout(
+        () => this.particles.update((current) => current.filter((p) => p.id !== particle.id)),
+        tramo.delayMs + DURACION_MS + 100,
+      );
+    }
+  }
+
   /** Pulsar la tarea ya fijada la suelta: es el mismo gesto para las dos cosas. */
   protected pin(taskId: string): void {
     this.pinnedTask.update((current) => (current === taskId ? null : taskId));
+  }
+
+  /**
+   * DÓNDE esperó la tarea, deducido del paso anterior.
+   *
+   * Esto no es un adorno: sin ello la vista miente. Una tarea puede esperar por
+   * dos motivos que significan lo contrario, y pintados iguales se confunden:
+   *
+   *   tras "aceptada"            -> espera en jobs.work porque hay COLA. Se
+   *                                 arregla escalando workers.
+   *   tras "a la cola de espera" -> espera en un tramo de TTL. Eso es el BACKOFF
+   *                                 funcionando, y es el diseño.
+   *
+   * La primera versión de esta vista las mostraba iguales, y en el demo real un
+   * atasco de 39 segundos en la cola de trabajo parecía un backoff de 39
+   * segundos. Justo el malentendido que la vista existe para evitar.
+   */
+  protected waitKind(previousType: string): 'cola' | 'backoff' {
+    return previousType === 'RETRY_SCHEDULED' ? 'backoff' : 'cola';
+  }
+
+  protected waitExplanation(previousType: string): string {
+    return this.waitKind(previousType) === 'backoff'
+      ? 'en un tramo de espera — esto es el backoff'
+      : 'en jobs.work, esperando un worker libre';
   }
 
   /**
@@ -133,6 +235,27 @@ export class App implements OnInit {
       },
       error: (e) => this.done(`error: ${e.message}`),
     });
+  }
+
+  /**
+   * Descarga un archivo de ejemplo para quien quiera probar la subida.
+   *
+   * Se genera en el navegador en vez de servirse como fichero estático: así no
+   * hay una ruta más que mantener ni un archivo que se desincronice de los
+   * límites reales del API. Veinte líneas, muy por debajo del tope de 200.
+   */
+  protected downloadSample(): void {
+    const lineas = Array.from(
+      { length: 20 },
+      (_, i) => `procesar el lote ${String(i + 1).padStart(2, '0')} del cierre diario`,
+    ).join('\n');
+
+    const url = URL.createObjectURL(new Blob([lineas], { type: 'text/plain' }));
+    const enlace = document.createElement('a');
+    enlace.href = url;
+    enlace.download = 'ejemplo-job-forge.txt';
+    enlace.click();
+    URL.revokeObjectURL(url);
   }
 
   private done(text: string): void {
