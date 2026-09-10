@@ -28,6 +28,17 @@ spec:
     server: https://kubernetes.default.svc
     namespace: job-forge
 
+  # Con KEDA gobernando las réplicas del worker, el chart deja de declararlas.
+  # Aun así se ignora explícitamente: si alguien vuelve a añadir el campo sin
+  # entender por qué no estaba, esto evita que Argo y el autoescalador entren en
+  # un bucle de revertirse mutuamente.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: job-forge-worker
+      jsonPointers:
+        - /spec/replicas
+
   syncPolicy:
     automated:
       prune: true

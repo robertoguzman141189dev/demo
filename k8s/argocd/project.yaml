@@ -21,6 +21,7 @@ spec:
   sourceRepos:
     - https://github.com/robertoguzman141189dev/demo.git
     - https://kubernetes.github.io/ingress-nginx
+    - https://kedacore.github.io/charts
 
   # A dónde. El namespace de cada demo, el de los brokers y el del Ingress; no el
   # de kube-system, y no un comodín.
@@ -39,6 +40,8 @@ spec:
       namespace: platform
     - server: https://kubernetes.default.svc
       namespace: ingress-nginx
+    - server: https://kubernetes.default.svc
+      namespace: keda
 
   # Recursos de ámbito de cluster permitidos. La lista es corta a propósito:
   # ingress-nginx necesita crear su IngressClass y sus roles, y ahí se acaba.
@@ -58,6 +61,11 @@ spec:
       kind: StorageClass
     - group: apiextensions.k8s.io
       kind: CustomResourceDefinition
+    # KEDA publica sus métricas al HPA registrándose como un servidor de la API
+    # de métricas externas. Sin este permiso el chart se instala y el
+    # autoescalador nunca recibe un valor.
+    - group: apiregistration.k8s.io
+      kind: APIService
 
   # Dentro de los namespaces permitidos, cualquier recurso.
   namespaceResourceWhitelist:

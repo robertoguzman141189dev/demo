@@ -141,9 +141,11 @@ kind-secret: ## Crea el Secret de RabbitMQ con una contraseña aleatoria
 	@$(KUBECTL) create namespace platform --dry-run=client -o yaml | $(KUBECTL) apply -f -
 	@$(KUBECTL) create namespace job-forge --dry-run=client -o yaml | $(KUBECTL) apply -f -
 	@PASS=$$(openssl rand -hex 16); \
+	URL="amqp://job-forge:$$PASS@rabbitmq.platform.svc.cluster.local:5672/"; \
 	for NS in platform job-forge; do \
 	  $(KUBECTL) -n $$NS create secret generic job-forge-rabbitmq \
 	    --from-literal=username=job-forge --from-literal=password=$$PASS \
+	    --from-literal=amqpUrl="$$URL" \
 	    --dry-run=client -o yaml | $(KUBECTL) apply -f -; \
 	done
 

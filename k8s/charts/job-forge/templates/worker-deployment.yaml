@@ -7,7 +7,16 @@ metadata:
   labels:
     {{- include "job-forge.labels" (dict "root" . "component" $component) | nindent 4 }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
+  # Con KEDA encendido, este campo se OMITE a propósito.
+  #
+  # Si se declara, hay dos dueños del número de réplicas: el chart lo fija en
+  # cada sincronización y el autoescalador lo mueve según la cola. Argo ve la
+  # diferencia como desviación, la revierte por selfHeal, KEDA vuelve a
+  # escalar... y el Deployment oscila para siempre sin que nadie entienda por
+  # qué. Omitirlo deja un único dueño.
   replicas: {{ $svc.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "job-forge.selectorLabels" (dict "root" . "component" $component) | nindent 6 }}

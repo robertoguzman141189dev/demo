@@ -1,0 +1,63 @@
+# KEDA: el autoescalador que mira la cola, no la CPU.
+#
+# Por que no el HPA de CPU, que es lo que viene de serie. Un worker de este
+# sistema pasa la mayor parte del tiempo ESPERANDO: espera a que RabbitMQ le
+# entregue, espera a que termine el trabajo simulado, espera el confirm de Kafka.
+# Su CPU no sube aunque haya mil tareas encoladas, asi que un HPA de CPU no
+# escalaria nunca justo cuando mas falta hace.
+#
+# La senal correcta es la profundidad de jobs.work: cuantas tareas hay esperando
+# a que alguien las coja. Eso es exactamente lo que mide KEDA aqui.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: event-lab
+
+  source:
+    repoURL: https://kedacore.github.io/charts
+    chart: keda
+    # Version fijada: un autoescalador que se actualiza solo puede cambiar como
+    # responde tu sistema a la carga sin que nadie toque el repositorio.
+    targetRevision: 2.17.2
+    helm:
+      values: |
+        # Recortado para el nodo del demo, que son 4 GiB compartidos con dos
+        # brokers, el Ingress, Argo CD y los cuatro servicios.
+        resources:
+          operator:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          metricServer:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              memory: 192Mi
+          webhooks:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keda
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # El chart trae CRD grandes; sin apply del lado del servidor algunos
+      # superan el limite de la anotacion last-applied-configuration.
+      - ServerSideApply=true

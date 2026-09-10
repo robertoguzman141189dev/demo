@@ -1,0 +1,79 @@
+{{- if .Values.autoscaling.enabled }}
+{{/*
+Autoescalado del worker por PROFUNDIDAD DE COLA, no por CPU.
+
+Un worker de este sistema pasa casi todo su tiempo esperando: a que RabbitMQ le
+entregue, a que termine el trabajo simulado, al confirm de Kafka. Su CPU no sube
+aunque haya mil tareas encoladas. Un HPA de CPU no escalaría nunca en el momento
+en que hace falta, y escalaría por ruido en momentos en que no.
+
+La señal correcta es cuántas tareas están esperando a que alguien las coja.
+*/}}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "job-forge.fullname" . }}-rabbitmq
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" "worker") | nindent 4 }}
+spec:
+  # Las credenciales por referencia, igual que en todo lo demás. KEDA necesita la
+  # URL completa con usuario y contraseña, así que se guarda ya compuesta como
+  # una clave más del mismo Secret: un solo sitio del que dependen, y ninguno de
+  # ellos es el repositorio.
+  secretTargetRef:
+    - parameter: host
+      name: {{ .Values.platform.rabbitmq.credentialsSecret }}
+      key: {{ .Values.platform.rabbitmq.amqpUrlKey }}
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "job-forge.fullname" . }}-worker
+  labels:
+    {{- include "job-forge.labels" (dict "root" . "component" "worker") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "job-forge.fullname" . }}-worker
+
+  minReplicaCount: {{ .Values.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.autoscaling.maxReplicas }}
+
+  # Cada cuánto consulta la cola. 15s es un compromiso: más frecuente castiga al
+  # broker con consultas constantes, y más espaciado hace que el demo parezca que
+  # no reacciona.
+  pollingInterval: {{ .Values.autoscaling.pollingSeconds }}
+
+  # Cuánto espera antes de bajar réplicas. Generoso a propósito: un worker que se
+  # apaga tiene que terminar la tarea en curso, publicar al tramo que toque y
+  # acusar (ADR 004). Bajar en cuanto la cola se vacía provocaría un baile de
+  # arranques y apagados con cada ráfaga, y cada arranque cuesta reconstruir el
+  # estado desde el topic compactado.
+  cooldownPeriod: {{ .Values.autoscaling.cooldownSeconds }}
+
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # Baja de uno en uno. Quitar varios consumidores a la vez deja tareas
+          # en vuelo que hay que reentregar.
+          stabilizationWindowSeconds: {{ .Values.autoscaling.cooldownSeconds }}
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: amqp
+        queueName: jobs.work
+        # QueueLength y no MessageRate: lo que importa es cuánto trabajo hay
+        # pendiente, no a qué ritmo entra. Una ráfaga corta no debería disparar
+        # réplicas que sobrarán en veinte segundos.
+        mode: QueueLength
+        # Tareas encoladas por réplica. Con 10, una cola de 30 pide 3 workers.
+        value: {{ .Values.autoscaling.tasksPerWorker | quote }}
+      authenticationRef:
+        name: {{ include "job-forge.fullname" . }}-rabbitmq
+{{- end }}

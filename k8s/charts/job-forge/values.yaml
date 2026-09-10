@@ -38,6 +38,10 @@ platform:
     credentialsSecret: job-forge-rabbitmq
     usernameKey: username
     passwordKey: password
+    # KEDA necesita la URL completa con credenciales para consultar la cola. Se
+    # guarda ya compuesta como una clave más del mismo Secret, en vez de crear
+    # otro: un solo sitio del que dependen las credenciales.
+    amqpUrlKey: amqpUrl
   kafka:
     bootstrap: kafka.platform.svc.cluster.local:9092
 
@@ -97,6 +101,25 @@ ingress:
 # Pending. Se enciende en el módulo de EKS.
 topologySpread:
   enabled: false
+
+# Autoescalado del worker con KEDA, por profundidad de cola.
+#
+# Apagado por defecto porque exige que KEDA esté instalado en el cluster: en kind
+# no lo está, y una ScaledObject sin su CRD hace fallar el despliegue entero. Se
+# enciende en el values del entorno que lo tenga.
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  # Tres, no diez. El nodo del demo son 4 GiB compartidos con dos brokers, el
+  # Ingress, Argo CD y los otros tres servicios. Un autoescalador que puede pedir
+  # más memoria de la que existe no escala: deja pods en Pending.
+  maxReplicas: 3
+  # Tareas encoladas por réplica. Con 10, una cola de 30 pide 3 workers.
+  tasksPerWorker: 10
+  pollingSeconds: 15
+  # Generoso a propósito: cada arranque de worker cuesta reconstruir su estado
+  # desde el topic compactado, así que conviene no bailar con cada ráfaga.
+  cooldownSeconds: 120
 
 serviceAccount:
   # Un ServiceAccount por servicio, nunca el default. Ninguno de los cuatro habla

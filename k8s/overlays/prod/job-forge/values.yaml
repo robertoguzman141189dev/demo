@@ -55,8 +55,25 @@ api:
     limits:
       cpu: "1"
       memory: 384Mi
+# Autoescalado encendido: KEDA está instalado en este cluster.
+#
+# El worker deja de tener un número fijo de réplicas y pasa a seguir la
+# profundidad de jobs.work. Con `tasksPerWorker: 10`, una cola de 30 pide tres
+# workers; vacía, vuelve a uno.
+#
+# El tope de tres no es prudencia genérica: son los 4 GiB del nodo, compartidos
+# con dos brokers, el Ingress, Argo CD y KEDA. Un autoescalador que puede pedir
+# más memoria de la que hay no escala, deja pods en Pending.
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  tasksPerWorker: 10
+
 worker:
-  # UNO, no dos, y es la restricción que manda en todo este archivo.
+  # El `replicas` de aquí abajo lo IGNORA el chart cuando autoscaling está
+  # encendido: manda KEDA. Se conserva como el valor con el que arrancaría si se
+  # apagara el autoescalado.
   #
   # Medido en kind: el despliegue completo pide unos 2,5 GiB solo en requests, y
   # el nodo del demo es una t4g.medium de 4 GiB compartidos con el propio k3s,
