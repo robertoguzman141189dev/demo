@@ -42,11 +42,15 @@ BUDGET_ALERT_EMAIL ?=
 # Version del chart de Argo CD, fijada. Un agente de GitOps que se actualiza solo
 # puede cambiar como se sincroniza todo lo demas sin que nadie toque el repositorio.
 ARGOCD_CHART_VERSION := 9.1.7
+# Tiene que coincidir con targetRevision de k8s/argocd/applications/keda.yaml: si
+# los CRD que se aplican a mano y los que espera Argo son de versiones distintas,
+# Argo los vera como desviacion permanente.
+KEDA_CHART_VERSION := 2.17.2
 
 .DEFAULT_GOAL := help
 .PHONY: help demo up down restart ps logs topics urls clean nuke build test verify run-api run-worker run-audit run-ui estado \
         kind-up kind-down kind-ingress kind-secret images kind-load deploy k8s k8s-status k8s-urls \
-        argocd-install argocd-bootstrap argocd-password argocd-ui argocd-status \
+        argocd-install argocd-bootstrap argocd-password argocd-ui argocd-status keda-crds \
         aws-quien tf-fmt tf-bootstrap tf-outputs tf-demo-plan tf-demo-apply tf-demo-destroy \
         tf-lab-plan tf-lab-apply tf-lab-destroy
 
@@ -267,6 +271,25 @@ argocd-bootstrap: ## Aplica los proyectos y la aplicacion raiz; a partir de aqui
 	kubectl apply -f k8s/argocd/project.yaml
 	kubectl apply -f k8s/argocd/project-plataforma.yaml
 	kubectl apply -f k8s/argocd/root.yaml
+
+# Los CRD de KEDA se aplican APARTE y del lado del servidor, y no es un capricho.
+#
+# El CRD scaledjobs.keda.sh es tan grande que no cabe en la anotacion
+# last-applied-configuration, que tiene un tope de 256 KB en el API server. Con
+# apply del lado del cliente, el objeto se rechaza por "metadata.annotations: Too
+# long". Y como esa validacion ocurre ANTES de aplicar nada, Argo aborta la
+# sincronizacion entera: el namespace keda no llega a crearse, y eso provoca dos
+# errores mas en cascada que no mencionan el CRD por ningun lado.
+#
+# Aplicarlos del lado del servidor evita esa anotacion por completo. Despues,
+# Argo los encuentra ya presentes y sincroniza el resto del chart sin problema.
+keda-crds: ## Aplica los CRD de KEDA del lado del servidor (antes de que Argo sincronice)
+	helm repo add kedacore https://kedacore.github.io/charts
+	helm repo update kedacore
+	kubectl create namespace keda --dry-run=client -o yaml | kubectl apply -f -
+	helm template keda kedacore/keda --version $(KEDA_CHART_VERSION) \
+		--namespace keda --include-crds \
+		| kubectl apply --server-side --force-conflicts -f -
 
 argocd-password: ## Contrasena inicial del administrador
 	@kubectl -n argocd get secret argocd-initial-admin-secret \

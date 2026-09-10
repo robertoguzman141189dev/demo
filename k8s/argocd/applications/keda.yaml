@@ -58,6 +58,21 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      # El chart trae CRD grandes; sin apply del lado del servidor algunos
-      # superan el limite de la anotacion last-applied-configuration.
       - ServerSideApply=true
+
+# AVISO: esta Application NO puede instalar los CRD por si sola, y hace falta
+# ejecutar `make keda-crds` UNA VEZ antes de que Argo sincronice.
+#
+# El CRD scaledjobs.keda.sh es tan grande que no cabe en la anotacion
+# last-applied-configuration, que tiene un tope de 256 KB en el API server. Y esa
+# validacion ocurre ANTES de aplicar nada, asi que Argo aborta la sincronizacion
+# entera: el namespace keda no llega a crearse, y eso produce dos errores mas en
+# cascada -"namespaces keda not found" y un fallo de rbacReconcile- que no
+# mencionan el CRD por ningun lado. Tres sintomas, una causa.
+#
+# ServerSideApply=true esta puesto arriba y aun asi no basto: el objeto se
+# rechazaba igual. Aplicarlos aparte con --server-side si funciona, y despues
+# Argo los encuentra presentes y sincroniza el resto del chart sin problema.
+#
+# La version de `make keda-crds` tiene que coincidir con el targetRevision de
+# aqui arriba, o Argo vera desviacion permanente.
