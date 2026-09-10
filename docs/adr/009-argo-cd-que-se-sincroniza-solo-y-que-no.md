@@ -48,14 +48,45 @@ y a partir de ahí añadir un demo es añadir un archivo y hacer commit.
 Después de aplicarla, **el único `kubectl apply` que este proyecto ejecuta contra
 el cluster ya se ejecutó**. Ese es el objetivo.
 
-### 4. Un `AppProject` propio, no el `default`
+### 4. Dos `AppProject`, y ninguno es el `default`
 
 El proyecto por defecto permite desplegar cualquier cosa, en cualquier namespace,
-desde cualquier repositorio. `event-lab` acota los tres orígenes permitidos, los
-tres namespaces de destino y una lista corta de recursos de ámbito de cluster.
+desde cualquier repositorio. Aquí hay dos vallas distintas:
+
+- **`event-lab`** — los demos. Solo este repositorio, solo los namespaces
+  `argocd`, `job-forge` y `platform`.
+- **`plataforma`** — la infraestructura: ingress-nginx y KEDA. Sus repositorios de
+  charts, sus namespaces, y `kube-system`.
+
+**Son dos porque KEDA necesita `kube-system`.** Su chart crea allí el `Role` y el
+`RoleBinding` que su servidor de métricas usa para leer la configuración de
+autenticación del API server; sin ellos se instala y el autoescalador nunca
+recibe un valor. El proyecto del demo excluye ese namespace, así que rechazaba la
+sincronización con un escueto *"one or more synchronization tasks are not valid"*
+que no dice ni qué tarea ni por qué.
+
+La salida fácil era añadir `kube-system` al proyecto del demo. Eso le habría dado
+a `job-forge` —una aplicación pública y anónima— permiso permanente sobre el
+namespace del propio Kubernetes, por la comodidad de un día. Separarlos cuesta un
+archivo más y deja a cada cosa donde le corresponde.
 
 No protege de alguien que ya controle Argo CD. Protege del error honesto y limita
 el radio de un repositorio comprometido, que es la amenaza realista.
+
+#### Los proyectos NO los gestiona Argo, y eso muerde
+
+La aplicación raíz solo mira `k8s/argocd/applications/`. Los `AppProject` viven
+fuera y se aplican a mano en el arranque.
+
+Es deliberado: si Argo gestionara su propia valla, un commit malo en ella podría
+dejarlo sin permiso para arreglarse a sí mismo. Pero tiene un precio que ya se
+pagó una vez — se cambia un proyecto, se commitea, se empuja, y **no llega al
+cluster**. El síntoma es Argo rechazando aplicaciones por permisos que en el
+repositorio ya están concedidos, sin que nada indique que la versión del cluster
+es otra.
+
+Se mitiga con lo único que se puede: dejarlo escrito en el objetivo de `make` que
+hay que relanzar, y aquí.
 
 ### 5. La interfaz de Argo CD no se expone
 

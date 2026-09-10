@@ -16,7 +16,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: event-lab
+  project: plataforma
 
   source:
     repoURL: https://kedacore.github.io/charts

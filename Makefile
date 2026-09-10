@@ -253,8 +253,19 @@ argocd-install: ## Instala Argo CD en el cluster activo
 
 # El unico `kubectl apply` que este proyecto ejecuta contra el cluster. Despues
 # de esto, Argo descubre solo todo lo que haya en k8s/argocd/applications/.
-argocd-bootstrap: ## Aplica el proyecto y la aplicacion raiz; a partir de aqui manda git
+#
+# OJO, y esto costo un despliegue entender: los AppProject NO los gestiona Argo.
+# La aplicacion raiz solo mira k8s/argocd/applications/, asi que un cambio en un
+# proyecto se commitea, se empuja... y no llega al cluster. El sintoma es que
+# Argo rechaza aplicaciones por permisos que en el repositorio ya estan
+# concedidos, sin que nada indique que la version del cluster es otra.
+#
+# Estan fuera a proposito: si Argo gestionara su propia valla, un commit malo en
+# ella podria dejarlo sin permiso para arreglarse a si mismo. El precio es tener
+# que acordarse de este comando. RELANZA ESTO cada vez que toques un project.
+argocd-bootstrap: ## Aplica los proyectos y la aplicacion raiz; a partir de aqui manda git
 	kubectl apply -f k8s/argocd/project.yaml
+	kubectl apply -f k8s/argocd/project-plataforma.yaml
 	kubectl apply -f k8s/argocd/root.yaml
 
 argocd-password: ## Contrasena inicial del administrador

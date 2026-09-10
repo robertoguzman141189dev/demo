@@ -1,0 +1,64 @@
+# La valla de los componentes de plataforma, separada de la del demo.
+#
+# POR QUÉ EXISTE ESTE SEGUNDO PROYECTO, que costó un despliegue fallido entender.
+#
+# El chart de KEDA crea dos recursos en `kube-system`: el Role y el RoleBinding
+# que su servidor de métricas necesita para leer la configuración de
+# autenticación del API server. Sin ellos, el autoescalador se instala y nunca
+# recibe un valor.
+#
+# El proyecto `event-lab` excluye `kube-system` a propósito, así que rechazaba la
+# sincronización con un escueto "one or more synchronization tasks are not valid"
+# que no dice qué tarea ni por qué.
+#
+# La salida fácil era añadir `kube-system` a `event-lab`. Eso le habría dado a
+# job-forge —una aplicación de demostración, pública y anónima— permiso
+# permanente para crear cosas en el namespace del propio Kubernetes, para siempre
+# y por la comodidad de un día.
+#
+# Así que la infraestructura tiene su propia valla. job-forge nunca alcanza
+# kube-system; KEDA e ingress-nginx nunca alcanzan job-forge.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: plataforma
+  namespace: argocd
+spec:
+  description: Componentes de infraestructura del cluster, no los demos
+
+  sourceRepos:
+    - https://kubernetes.github.io/ingress-nginx
+    - https://kedacore.github.io/charts
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: ingress-nginx
+    - server: https://kubernetes.default.svc
+      namespace: keda
+    # El agujero, acotado a este proyecto y explicado arriba.
+    - server: https://kubernetes.default.svc
+      namespace: kube-system
+
+  # Lo que un componente de plataforma legítimamente necesita crear fuera de su
+  # namespace. La lista sigue siendo corta y explícita.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: networking.k8s.io
+      kind: IngressClass
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+    # KEDA se registra como servidor de la API de métricas externas para que el
+    # HPA pueda consultarle.
+    - group: apiregistration.k8s.io
+      kind: APIService
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

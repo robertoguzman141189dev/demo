@@ -18,10 +18,11 @@ spec:
   description: Los dos demos de event-lab y la plataforma que comparten
 
   # De dónde se puede desplegar. Nada más que estos dos orígenes.
+  # Solo este repositorio. Los componentes de infraestructura —ingress-nginx,
+  # KEDA— viven en el proyecto `plataforma`, que tiene su propia valla y su
+  # propia lista de orígenes. Ver project-plataforma.yaml para el porqué.
   sourceRepos:
     - https://github.com/robertoguzman141189dev/demo.git
-    - https://kubernetes.github.io/ingress-nginx
-    - https://kedacore.github.io/charts
 
   # A dónde. El namespace de cada demo, el de los brokers y el del Ingress; no el
   # de kube-system, y no un comodín.
@@ -38,10 +39,10 @@ spec:
       namespace: job-forge
     - server: https://kubernetes.default.svc
       namespace: platform
-    - server: https://kubernetes.default.svc
-      namespace: ingress-nginx
-    - server: https://kubernetes.default.svc
-      namespace: keda
+    # ingress-nginx, keda y kube-system NO están aquí a propósito: son
+    # infraestructura y viven en el proyecto `plataforma`. Este proyecto es el
+    # de una aplicación de demostración pública y anónima, y no tiene por qué
+    # poder tocar el controlador de Ingress ni el autoescalador del cluster.
 
   # Recursos de ámbito de cluster permitidos. La lista es corta a propósito:
   # ingress-nginx necesita crear su IngressClass y sus roles, y ahí se acaba.
